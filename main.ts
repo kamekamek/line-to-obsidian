@@ -76,7 +76,7 @@ export default class LineToObsidianPlugin extends Plugin {
 			let apiUrl = '';
 			
 			try {
-				const resolveEndpointUrl = `https://asia-northeast1-line-obsidian-notes-sync.cloudfunctions.net/resolveEndpointV2?code=${encodeURIComponent(this.settings.shortCode)}`;
+				const resolveEndpointUrl = `https://asia-northeast1-line-obsidian-notes-sync.cloudfunctions.net/resolveEndpoint?code=${encodeURIComponent(this.settings.shortCode)}`;
 				console.log('解決URL:', resolveEndpointUrl);
 				
 				const response = await fetch(resolveEndpointUrl);

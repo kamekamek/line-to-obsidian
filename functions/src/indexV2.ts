@@ -355,7 +355,7 @@ if (process.env.NODE_ENV === 'production') {
 */
 
 // LINE Webhook
-export const lineWebhookV2 = onRequest(
+export const lineWebhook = onRequest(
   { 
     region: 'asia-northeast1',
     cors: true,
@@ -472,7 +472,7 @@ export const lineWebhookV2 = onRequest(
 );
 
 // メモ同期API
-export const syncNotesV2 = onRequest(
+export const syncNotes = onRequest(
   {
     region: 'asia-northeast1',
     cors: true,
@@ -480,7 +480,7 @@ export const syncNotesV2 = onRequest(
     memory: '512MiB'
   },
   async (req: Request, res: Response) => {
-    logger.info('syncNotesV2 function called', { method: req.method, query: req.query });
+    logger.info('syncNotes function called', { method: req.method, query: req.query });
     
     // CORS設定
     res.set('Access-Control-Allow-Origin', '*');
@@ -585,7 +585,7 @@ export const syncNotesV2 = onRequest(
 );
 
 // クリーンアップ処理
-export const cleanupSyncedV2 = onRequest(
+export const cleanupSynced = onRequest(
   {
     region: 'asia-northeast1',
     cors: true,
@@ -593,7 +593,7 @@ export const cleanupSyncedV2 = onRequest(
     memory: '256MiB'
   },
   async (req: Request, res: Response) => {
-    logger.info('cleanupSyncedV2 function called');
+    logger.info('cleanupSynced function called');
     
     try {
       // 30日以上前の同期済みメモを取得
@@ -633,7 +633,7 @@ export const cleanupSyncedV2 = onRequest(
 );
 
 // エンドポイント解決関数
-export const resolveEndpointV2 = onRequest(
+export const resolveEndpoint = onRequest(
   {
     region: 'asia-northeast1',
     cors: true,
@@ -641,7 +641,7 @@ export const resolveEndpointV2 = onRequest(
     memory: '512MiB'
   },
   async (req: Request, res: Response) => {
-    logger.info('resolveEndpointV2 function called', { method: req.method, query: req.query });
+    logger.info('resolveEndpoint function called', { method: req.method, query: req.query });
     
     // CORS設定
     res.set('Access-Control-Allow-Origin', '*');
@@ -696,7 +696,7 @@ export const resolveEndpointV2 = onRequest(
       // エンドポイントURLを生成して返す
       res.status(200).json({
         success: true,
-        endpoint: `https://asia-northeast1-${projectId}.cloudfunctions.net/syncNotesV2`,
+        endpoint: `https://asia-northeast1-${projectId}.cloudfunctions.net/syncNotes`,
         projectName: codeData.projectName || 'LINE to Obsidian Sync'
       });
     } catch (error) {
