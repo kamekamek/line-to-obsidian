@@ -266,20 +266,25 @@ app.get('/syncNotes', async (req: Request, res: Response) => {
       const data = doc.data();
       return {
         id: doc.id,
-        content: data.text,
-        created: data.createdAt ? data.createdAt.toDate().getTime() : Date.now(),
+        text: data.text,
+        timestamp: data.createdAt ? data.createdAt.toDate().getTime() : Date.now(),
       };
     });
 
     // 同期済みフラグを更新
-    const batch = db.batch();
-    notesSnapshot.docs.forEach(doc => {
-      batch.update(doc.ref, { synced: true });
-    });
-    await batch.commit();
+    if (notes.length > 0) {
+      const batch = db.batch();
+      notesSnapshot.docs.forEach(doc => {
+        batch.update(doc.ref, { synced: true });
+      });
+      await batch.commit();
+    }
 
-    // JSON形式でレスポンス
-    res.status(200).json(notes);
+    // JSON形式でレスポンス（新しい形式）
+    res.status(200).json({
+      success: true,
+      notes: notes
+    });
   } catch (error) {
     console.error('Error syncing notes:', error);
     functions.logger.error('Error syncing notes:', error);
@@ -480,8 +485,8 @@ export const syncNotes = functions.region('asia-northeast1').https.onRequest(asy
       const data = doc.data();
       return {
         id: doc.id,
-        content: data.text,
-        created: data.createdAt ? data.createdAt.toDate().getTime() : Date.now(),
+        text: data.text,
+        timestamp: data.createdAt ? data.createdAt.toDate().getTime() : Date.now(),
       };
     });
 
@@ -494,8 +499,11 @@ export const syncNotes = functions.region('asia-northeast1').https.onRequest(asy
       await batch.commit();
     }
 
-    // JSON形式でレスポンス
-    res.status(200).json(notes);
+    // JSON形式でレスポンス（新しい形式）
+    res.status(200).json({
+      success: true,
+      notes: notes
+    });
   } catch (error) {
     console.error('Error syncing notes:', error);
     functions.logger.error('Error syncing notes:', error);

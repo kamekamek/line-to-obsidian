@@ -58,239 +58,177 @@ export default class LineToObsidianPlugin extends Plugin {
 	}
 
 	async syncNotes() {
-		if (!this.settings.apiEndpoint && !this.settings.projectId && !this.settings.shortCode) {
-			new Notice('APIエンドポイントURLまたはプロジェクトID/短縮コードが設定されていません。');
+		if (!this.settings.shortCode) {
+			new Notice('接続コードが設定されていません。');
 			return;
 		}
 
 		if (!this.settings.authToken) {
-			new Notice('Authentication Tokenが設定されていません。');
+			new Notice('認証トークンが設定されていません。');
 			return;
 		}
 
 		try {
 			new Notice('LINE メモの同期を開始します...');
+			console.log('同期開始: 接続コード使用', { shortCode: this.settings.shortCode });
 
 			// エンドポイントURLの構築
 			let apiUrl = '';
 			
-			if (this.settings.apiEndpoint) {
-				// 直接URLが設定されている場合はそれを使用
-				apiUrl = this.settings.apiEndpoint;
-			} else if (this.settings.shortCode) {
-				// 短縮コードがある場合はエンドポイント解決APIを使用
-				try {
-					const resolveEndpointUrl = `https://us-central1-line-obsidian-notes-sync.cloudfunctions.net/resolveEndpoint?code=${encodeURIComponent(this.settings.shortCode)}`;
-					const response = await fetch(resolveEndpointUrl);
-					
-					if (!response.ok) {
-						throw new Error(`短縮コードからエンドポイントの解決に失敗しました: ${response.status} ${response.statusText}`);
-					}
-					
-					const data = await response.json();
-					if (!data.success || !data.endpoint) {
-						throw new Error('無効な短縮コードです。正しいコードを入力してください。');
-					}
-					
-					apiUrl = data.endpoint;
-				} catch (resolveError) {
-					console.error('エンドポイント解決エラー:', resolveError);
-					throw new Error(`短縮コードからのエンドポイント解決に失敗しました: ${resolveError.message}`);
-				}
-			} else if (this.settings.projectId) {
-				// プロジェクトIDから直接構築
-				apiUrl = `https://us-central1-${this.settings.projectId}.cloudfunctions.net/syncNotes`;
-			}
-
-			let url = apiUrl;
-			if (this.settings.lastSync) {
-				url += `?authToken=${encodeURIComponent(this.settings.authToken)}&since=${this.settings.lastSync}`;
-			} else {
-				url += `?authToken=${encodeURIComponent(this.settings.authToken)}`;
-			}
-
-			console.log('Requesting URL:', url);
-
-			let response;
 			try {
-				response = await fetch(url, {
-					method: 'GET',
-					mode: 'cors',
-					headers: {
-						'Authorization': `Bearer ${this.settings.authToken}`,
-						'Content-Type': 'application/json'
-					}
-				});
-			} catch (fetchError) {
-				console.error('Fetch error:', fetchError);
-				throw new Error(`ネットワークエラー: ${fetchError.message || 'APIサーバーに接続できません'}`);
+				const resolveEndpointUrl = `https://asia-northeast1-line-obsidian-notes-sync.cloudfunctions.net/resolveEndpoint?code=${encodeURIComponent(this.settings.shortCode)}`;
+				console.log('解決URL:', resolveEndpointUrl);
+				
+				const response = await fetch(resolveEndpointUrl);
+				console.log('エンドポイント解決レスポンス:', response.status, response.statusText);
+				
+				if (!response.ok) {
+					throw new Error(`短縮コードからエンドポイントの解決に失敗しました: ${response.status} ${response.statusText}`);
+				}
+				
+				const data = await response.json();
+				console.log('解決レスポンスデータ:', data);
+				
+				if (!data.success || !data.endpoint) {
+					throw new Error('無効な接続コードです。正しいコードを入力してください。');
+				}
+				
+				apiUrl = data.endpoint;
+				console.log('解決されたエンドポイント:', apiUrl);
+			} catch (resolveError) {
+				console.error('エンドポイント解決エラー:', resolveError);
+				throw new Error(`接続コードからのエンドポイント解決に失敗しました: ${resolveError.message}`);
 			}
 
-			console.log('Response status:', response.status, response.statusText);
+			// APIリクエストの本体
+			console.log('APIリクエスト準備:', { 
+				url: apiUrl, 
+				method: 'POST',
+				lastSyncTimestamp: this.settings.lastSync || 0 
+			});
+			
+			const response = await fetch(`${apiUrl}`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${this.settings.authToken}`
+				},
+				body: JSON.stringify({
+					lastSyncTimestamp: this.settings.lastSync || 0
+				})
+			});
+			
+			console.log('API応答:', response.status, response.statusText);
 
 			if (!response.ok) {
-				const responseText = await response.text();
-				console.error('Response body:', responseText);
-				throw new Error(`APIリクエストが失敗しました: ${response.status} ${response.statusText} - ${responseText}`);
+				const errorText = await response.text();
+				console.error('エラーレスポンス本文:', errorText);
+				throw new Error(`APIリクエストが失敗しました: ${response.status} ${response.statusText} - ${errorText}`);
 			}
 
-			const data = await response.json();
-			console.log('Response data:', data);
+			const responseText = await response.text();
+			console.log('APIレスポンス本文:', responseText);
 			
-			if (!data || !Array.isArray(data)) {
-				throw new Error('APIからの応答が不正です。');
-			}
-
-			let safePath = this.normalizePath(this.settings.syncFolderPath);
-			if (!(await this.app.vault.adapter.exists(safePath))) {
-				await this.app.vault.createFolder(safePath);
-			}
-
-			// APIレスポンスの詳細検証
-			if (!data) {
-				throw new Error('APIからの応答が空です。');
-			}
-			
-			if (!Array.isArray(data)) {
-				throw new Error('APIからの応答が配列形式ではありません。');
-			}
-			
-			// 同期済みIDの配列がない場合は初期化
-			if (!this.settings.syncedNoteIds) {
-				this.settings.syncedNoteIds = [];
-			}
-			
-			// 既存のファイルをマップに取得
-			const existingFiles = new Map();
-			const folderFiles = await this.app.vault.adapter.list(safePath);
-			for (const file of folderFiles.files) {
-				// ファイル名からIDを抽出（ファイル名は "YYYYMMDDhhmmssmmm-id.md" 形式）
-				const match = file.split('/').pop()?.match(/-([a-zA-Z0-9]+)\.md$/);
-				if (match && match[1]) {
-					existingFiles.set(match[1], file);
-				}
-			}
-			
-			// 各ノートの構造検証
-			for (const note of data) {
-				if (!note.content) {
-					console.warn('コンテンツがないノートをスキップします。');
-				}
-				if (!note.created || isNaN(new Date(note.created).getTime())) {
-					console.warn('作成日が無効なノートをスキップします。');
-				}
-				if (!note.id) {
-					console.warn('IDがないノートをスキップします。');
-				}
-			}
-			
-			// 安全なパスの取得と検証
+			let data;
 			try {
-				safePath = this.normalizePath(this.settings.syncFolderPath);
-				if (!(await this.app.vault.adapter.exists(safePath))) {
-					await this.app.vault.createFolder(safePath);
-				}
-			} catch (pathError) {
-				console.error('パス処理エラー:', pathError);
-				throw new Error(`同期フォルダのパスが無効です: ${pathError.message}`);
+				data = JSON.parse(responseText);
+				console.log('パース済みデータ:', data);
+			} catch (parseError) {
+				console.error('JSONパースエラー:', parseError);
+				throw new Error(`APIレスポンスのパースに失敗しました: ${parseError.message}, 受信データ: ${responseText.substring(0, 100)}...`);
+			}
+			
+			// レスポンス形式の判定（配列形式または新形式）
+			let notesArray = [];
+			if (Array.isArray(data)) {
+				// 旧形式（配列）- APIが以前の形式を返している場合
+				console.log('旧形式のレスポンスを検出しました');
+				notesArray = data.map(item => ({
+					id: item.id,
+					text: item.content || item.text || '',
+					timestamp: item.created || item.timestamp || Date.now()
+				}));
+			} else if (data.success && Array.isArray(data.notes)) {
+				// 新形式（オブジェクト） - 修正後のAPI形式
+				console.log('新形式のレスポンスを検出しました');
+				notesArray = data.notes;
+			} else {
+				console.error('APIエラー応答:', data);
+				throw new Error(`同期エラー: ${data.error || '不明なエラーが発生しました'}`);
 			}
 
+			console.log(`取得したノート: ${notesArray.length}件`);
+			
+			if (notesArray.length === 0) {
+				new Notice('新しいLINEメモはありません。');
+				return;
+			}
+
+			// 同期フォルダの作成（なければ）
+			const folderPath = this.settings.syncFolderPath || 'LINE Memos';
+			console.log('同期フォルダパス:', folderPath);
+			
+			try {
+				await this.createFolderIfNotExists(folderPath);
+				console.log('フォルダ準備完了');
+			} catch (error) {
+				console.error('フォルダ作成エラー:', error);
+				throw new Error(`同期フォルダの作成に失敗しました: ${error.message}`);
+			}
+
+			// 新しいノートの作成
 			let successCount = 0;
-			let updateCount = 0;
-			let latestTimestamp = 0;
-			let failedNotes = [];
-			
-			for (const note of data) {
-				try {
-					// IDがない場合はスキップ
-					if (!note.id) {
-						failedNotes.push({
-							reason: 'IDがありません',
-							content: note.content ? note.content.substring(0, 30) + '...' : 'コンテンツなし'
-						});
-						continue;
-					}
-					
-					// 日付の検証
-					if (!note.created || isNaN(new Date(note.created).getTime())) {
-						failedNotes.push({
-							reason: '無効な日付',
-							content: note.content ? note.content.substring(0, 30) + '...' : 'コンテンツなし'
-						});
-						continue;
-					}
-					
-					const timestamp = new Date(note.created);
-					const noteTimestamp = timestamp.getTime();
-					
-					if (noteTimestamp > latestTimestamp) {
-						latestTimestamp = noteTimestamp;
-					}
-					
-					// 既に同期済みかチェック
-					const isAlreadySynced = this.settings.syncedNoteIds.includes(note.id);
-					const existingFilePath = existingFiles.get(note.id);
-					
-					// ファイル名生成と保存
-					try {
-						if (existingFilePath) {
-							// 既存ファイルを更新
-							await this.app.vault.adapter.write(existingFilePath, note.content || '');
-							updateCount++;
-							
-							// 同期済みIDリストに追加（まだなければ）
-							if (!isAlreadySynced) {
-								this.settings.syncedNoteIds.push(note.id);
-							}
-						} else {
-							// 新規ファイル作成
-							const formattedDate = this.formatDateWithId(timestamp, note.id);
-							const fileName = `${safePath}/${formattedDate}.md`;
-							await this.app.vault.create(fileName, note.content || '');
-							successCount++;
-							
-							// 同期済みIDリストに追加
-							if (!isAlreadySynced) {
-								this.settings.syncedNoteIds.push(note.id);
-							}
-						}
-					} catch (fileError) {
-						console.error(`ファイル作成エラー: ${fileError.message}`);
-						failedNotes.push({
-							reason: `ファイル作成エラー: ${fileError.message}`,
-							content: note.content ? note.content.substring(0, 30) + '...' : 'コンテンツなし',
-							date: timestamp.toLocaleString()
-						});
-					}
-				} catch (e) {
-					console.error(`メモ処理エラー: ${e.message}`);
-					failedNotes.push({
-						reason: `処理エラー: ${e.message}`,
-						content: note.content ? note.content.substring(0, 30) + '...' : 'コンテンツなし'
-					});
-				}
-			}
-			
-			// 失敗したノートがある場合の詳細ログ
-			if (failedNotes.length > 0) {
-				console.warn(`${failedNotes.length}件のノート保存に失敗:`, failedNotes);
-				new Notice(`警告: ${failedNotes.length}件のノート保存に失敗しました。コンソールで詳細を確認できます。`);
-			}
+			const updatedNoteIds = [...this.settings.syncedNoteIds];
 
-			if ((successCount > 0 || updateCount > 0) && latestTimestamp > 0) {
-				this.settings.lastSync = latestTimestamp;
+			for (const note of notesArray) {
 				try {
-					await this.saveSettings();
-				} catch (settingsError) {
-					console.error('設定保存エラー:', settingsError);
-					new Notice('警告: 同期タイムスタンプの保存に失敗しました。次回の同期で重複したノートが同期される可能性があります。');
+					console.log('ノート処理開始:', { id: note.id, timestamp: note.timestamp });
+					
+					// ファイル名を生成（日時+テキスト先頭から10文字）
+					const dateStr = new Date(note.timestamp || Date.now()).toISOString().split('T')[0];
+					const textPreview = note.text.substring(0, 10).replace(/[\\/:*?"<>|]/g, '_');
+					const fileName = `${dateStr} ${textPreview}.md`;
+					
+					// ファイルパス
+					const filePath = `${folderPath}/${fileName}`;
+					console.log('生成ファイルパス:', filePath);
+					
+					// ファイル内容
+					const content = `---
+created: ${new Date(note.timestamp || Date.now()).toISOString()}
+source: LINE
+note_id: ${note.id}
+---
+
+${note.text}`;
+
+					// ノートの作成
+					await this.app.vault.create(filePath, content);
+					console.log('ファイル作成成功:', filePath);
+					
+					// 同期済みIDリストに追加
+					if (note.id && !updatedNoteIds.includes(note.id)) {
+						updatedNoteIds.push(note.id);
+					}
+					
+					successCount++;
+				} catch (noteError) {
+					console.error('ノート作成エラー:', noteError, note);
+					// 個別のエラーは続行するため、throwしない
 				}
 			}
 
-			new Notice(`${successCount}件のLINEメモを同期し、${updateCount}件のメモを更新しました。`);
+			// 設定を更新
+			this.settings.lastSync = Date.now();
+			this.settings.syncedNoteIds = updatedNoteIds;
+			await this.saveSettings();
+			console.log('設定保存完了:', { lastSync: this.settings.lastSync, syncedCount: updatedNoteIds.length });
+
+			new Notice(`${successCount}件のLINEメモを同期しました。`);
+			
 		} catch (error) {
 			console.error('同期エラー:', error);
-			new Notice(`同期エラー: ${error.message}`);
+			new Notice(`同期中にエラーが発生しました: ${error.message}`);
 		}
 	}
 
@@ -319,10 +257,19 @@ export default class LineToObsidianPlugin extends Plugin {
 	}
 	
 	/**
-	 * パスを安全に正規化して検証する関数
-	 * - 不正な文字（Windows禁止文字など）の検出
-	 * - パストラバーサル攻撃の防止
-	 * - 空パスに対するデフォルト値の提供
+	 * フォルダが存在しない場合は作成するヘルパーメソッド
+	 * @param folderPath フォルダのパス
+	 * @throws エラー: フォルダ作成に失敗した場合
+	 */
+	async createFolderIfNotExists(folderPath: string): Promise<void> {
+		const normalizedPath = this.normalizePath(folderPath);
+		if (!(await this.app.vault.adapter.exists(normalizedPath))) {
+			await this.app.vault.createFolder(normalizedPath);
+		}
+	}
+
+	/**
+	 * パスを正規化するヘルパーメソッド
 	 * @param path 正規化する生のパス文字列
 	 * @returns 安全に正規化されたパス
 	 * @throws エラー: 無効な文字やパストラバーサル試行を検出した場合
@@ -392,37 +339,9 @@ class LineToObsidianSettingTab extends PluginSettingTab {
 		const apiSettingDiv = containerEl.createDiv('api-settings');
 		apiSettingDiv.createEl('h3', {text: '接続設定'});
 		
+		// 短縮コード設定（唯一の接続方法として表示）
 		new Setting(apiSettingDiv)
-			.setName('接続方法')
-			.setDesc('LINEメモとの同期方法を選択してください。')
-			.addDropdown(dropdown => {
-				dropdown
-					.addOption('shortcode', '短縮コードを使用 (推奨)')
-					.addOption('projectid', 'プロジェクトIDを使用')
-					.addOption('direct', 'エンドポイントURLを直接入力')
-					.setValue(
-						this.plugin.settings.shortCode ? 'shortcode' :
-						this.plugin.settings.projectId ? 'projectid' : 
-						'direct'
-					)
-					.onChange(async (value) => {
-						// 設定欄の表示/非表示を切り替え
-						const shortCodeSetting = containerEl.querySelector('.shortcode-setting') as HTMLElement;
-						const projectIdSetting = containerEl.querySelector('.projectid-setting') as HTMLElement;
-						const directUrlSetting = containerEl.querySelector('.direct-url-setting') as HTMLElement;
-						
-						if (shortCodeSetting && projectIdSetting && directUrlSetting) {
-							shortCodeSetting.style.display = value === 'shortcode' ? 'block' : 'none';
-							projectIdSetting.style.display = value === 'projectid' ? 'block' : 'none';
-							directUrlSetting.style.display = value === 'direct' ? 'block' : 'none';
-						}
-					});
-			});
-
-		// 短縮コード設定
-		const shortCodeSetting = new Setting(apiSettingDiv)
-			.setClass('shortcode-setting')
-			.setName('短縮コード')
+			.setName('接続コード')
 			.setDesc('LINEボットから提供された接続コードを入力してください。')
 			.addText(text => text
 				.setPlaceholder('例: ABC123')
@@ -431,47 +350,6 @@ class LineToObsidianSettingTab extends PluginSettingTab {
 					this.plugin.settings.shortCode = value;
 					await this.plugin.saveSettings();
 				}));
-		
-		// プロジェクトID設定
-		const projectIdSetting = new Setting(apiSettingDiv)
-			.setClass('projectid-setting')
-			.setName('Firebase プロジェクトID')
-			.setDesc('LINE to Obsidian連携用のFirebaseプロジェクトIDを入力してください。')
-			.addText(text => text
-				.setPlaceholder('例: line-obsidian-notes-sync')
-				.setValue(this.plugin.settings.projectId)
-				.onChange(async (value) => {
-					this.plugin.settings.projectId = value;
-					await this.plugin.saveSettings();
-				}));
-				
-		// 直接URL設定（従来の方法）
-		const directUrlSetting = new Setting(apiSettingDiv)
-			.setClass('direct-url-setting')
-			.setName('API Endpoint URL')
-			.setDesc('同期に使用するCloud Functionsの syncNotes 関数のURL。')
-			.addText(text => text
-				.setPlaceholder('https://your-project.cloudfunctions.net/syncNotes')
-				.setValue(this.plugin.settings.apiEndpoint)
-				.onChange(async (value) => {
-					this.plugin.settings.apiEndpoint = value;
-					await this.plugin.saveSettings();
-				}));
-				
-		// 初期表示を設定
-		if (this.plugin.settings.shortCode) {
-			(shortCodeSetting.settingEl as HTMLElement).style.display = 'block';
-			(projectIdSetting.settingEl as HTMLElement).style.display = 'none';
-			(directUrlSetting.settingEl as HTMLElement).style.display = 'none';
-		} else if (this.plugin.settings.projectId) {
-			(shortCodeSetting.settingEl as HTMLElement).style.display = 'none';
-			(projectIdSetting.settingEl as HTMLElement).style.display = 'block';
-			(directUrlSetting.settingEl as HTMLElement).style.display = 'none';
-		} else {
-			(shortCodeSetting.settingEl as HTMLElement).style.display = 'none';
-			(projectIdSetting.settingEl as HTMLElement).style.display = 'none';
-			(directUrlSetting.settingEl as HTMLElement).style.display = 'block';
-		}
 
 		new Setting(containerEl)
 			.setName('Authentication Token')
