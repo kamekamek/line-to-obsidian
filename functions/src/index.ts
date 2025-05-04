@@ -11,12 +11,25 @@ const db = admin.firestore();
 
 // LINE Bot設定を環境変数から取得
 const config = {
-  channelAccessToken: functions.config().line?.channel_access_token || process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
-  channelSecret: functions.config().line?.channel_secret || process.env.LINE_CHANNEL_SECRET || '',
+  channelAccessToken: functions.config().line?.channel_access_token || process.env.LINE_CHANNEL_ACCESS_TOKEN || 'dummy_token_for_testing',
+  channelSecret: functions.config().line?.channel_secret || process.env.LINE_CHANNEL_SECRET || 'dummy_secret_for_testing',
 };
 
-// LINEクライアントの初期化
-const lineClient = new line.Client(config);
+// LINEクライアントの初期化（エミュレータ環境でも動作するように）
+let lineClient;
+try {
+  lineClient = new line.Client(config);
+  functions.logger.log('LINE Client initialized successfully');
+} catch (error) {
+  functions.logger.warn('LINE Client initialization failed. Using dummy client for testing.', error);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  lineClient = {
+    replyMessage: async () => {
+      functions.logger.info('[MOCK] LINE message reply called');
+      return Promise.resolve(null);
+    }
+  } as any;
+}
 
 // Express アプリケーションのセットアップ
 const app = express();
