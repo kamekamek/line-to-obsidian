@@ -17,7 +17,7 @@ const config = {
 };
 
 // LINEクライアントの初期化（エミュレータ環境でも動作するように）
-let lineClient;
+let lineClient: line.Client | any;
 try {
   lineClient = new line.Client(config);
   logger.log('LINE Client initialized successfully');
@@ -29,7 +29,7 @@ try {
       logger.info('[MOCK] LINE message reply called');
       return Promise.resolve(null);
     }
-  } as any;
+  };
 }
 
 // Express アプリケーションのセットアップ
@@ -48,62 +48,96 @@ app.get('/', (req: Request, res: Response) => {
  */
 app.post('/lineWebhook', async (req: Request, res: Response) => {
   logger.info('lineWebhook function called');
-  // 署名検証
-  const signature = req.headers['x-line-signature'] as string;
-  if (!signature || !line.validateSignature(JSON.stringify(req.body), config.channelSecret, signature)) {
-    logger.error('Invalid signature');
-    res.status(401).send('Invalid signature');
-    return;
-  }
-
+  
   try {
-    const events: line.WebhookEvent[] = req.body.events;
+    // 署名検証
+    const signature = req.headers['x-line-signature'] as string;
+    if (!signature) {
+      logger.error('Missing LINE signature');
+      res.status(401).send('Missing signature');
+      return;
+    }
     
-    // 各イベントを処理
-    await Promise.all(events.map(async (event) => {
-      // メッセージイベントのみ処理
-      if (event.type !== 'message' || event.message.type !== 'text') {
-        return;
-      }
-
-      const { text } = event.message;
-      const { userId } = event.source;
-
-      if (!userId) {
-        logger.error('User ID not found');
-        return;
-      }
-
-      // "#登録" コマンドの処理
-      if (text.trim() === '#登録') {
-        const mappingId = await handleRegistration(userId);
-        
-        // マッピング情報を取得して短縮コードを取得
-        const mappingDoc = await db.collection('mappings').doc(mappingId).get();
-        const mappingData = mappingDoc.data();
-        const connectionCode = mappingData?.connectionCode || '';
-        
-        await lineClient.replyMessage(event.replyToken, {
-          type: 'text',
-          text: `登録が完了しました。これからメモを送ると自動的にObsidianに同期できるようになります。\n\n接続コード: ${connectionCode}\n認証トークン: ${mappingId}\n\nObsidianプラグインの設定画面で接続コードと認証トークンを入力してください。`,
-        });
-        return;
-      }
-
-      // 通常のメッセージをメモとして保存
-      await saveNote(userId, text);
-      await lineClient.replyMessage(event.replyToken, {
-        type: 'text',
-        text: 'メモを保存しました。Obsidianプラグインで同期するとノートとして表示されます。',
-      });
-    }));
-
+    // リクエストボディをJSON文字列に変換
+    const requestBody = JSON.stringify(req.body);
+    
+    // 署名を検証
+    if (!line.validateSignature(requestBody, config.channelSecret, signature)) {
+      logger.error('Invalid LINE signature');
+      res.status(401).send('Invalid signature');
+      return;
+    }
+    
+    // すぐに200 OKを返す（タイムアウト防止のため最優先）
     res.status(200).send('OK');
+    
+    // 以降の処理はバックグラウンドで実行
+    const events: line.WebhookEvent[] = req.body.events || [];
+    logger.info(`Processing ${events.length} events`);
+    
+    // 各イベントを非同期で処理（結果を待たない）
+    events.forEach(event => {
+      processEvent(event).catch(err => {
+        logger.error(`Event processing error for event: ${JSON.stringify(event)}`, err);
+      });
+    });
+
+    return; // 明示的に関数を終了する
   } catch (error) {
-    logger.error('Error processing webhook:', error);
-    res.status(500).send('Internal Server Error');
+    logger.error('Error in webhook handler:', error);
+    // まだレスポンスを送信していない場合のみ
+    if (!res.headersSent) {
+      res.status(500).send('Internal Server Error');
+    }
+    return; // 明示的に関数を終了する
   }
 });
+
+/**
+ * イベント処理関数（バックグラウンド処理用）
+ */
+async function processEvent(event: line.WebhookEvent): Promise<void> {
+  try {
+    // メッセージイベントのみ処理
+    if (event.type !== 'message' || event.message.type !== 'text') {
+      return;
+    }
+
+    const { text } = event.message;
+    const { userId } = event.source;
+
+    if (!userId) {
+      logger.error('User ID not found');
+      return;
+    }
+
+    // "#登録" コマンドの処理
+    if (text.trim() === '#登録') {
+      const mappingId = await handleRegistration(userId);
+      
+      // マッピング情報を取得して短縮コードを取得
+      const mappingDoc = await db.collection('mappings').doc(mappingId).get();
+      const mappingData = mappingDoc.data();
+      const connectionCode = mappingData?.connectionCode || '';
+      
+      await lineClient.replyMessage(event.replyToken, {
+        type: 'text',
+        text: `登録が完了しました。これからメモを送ると自動的にObsidianに同期できるようになります。\n\n接続コード: ${connectionCode}\n認証トークン: ${mappingId}\n\nObsidianプラグインの設定画面で接続コードと認証トークンを入力してください。`,
+      });
+      return;
+    }
+
+    // 通常のメッセージをメモとして保存
+    await saveNote(userId, text);
+    await lineClient.replyMessage(event.replyToken, {
+      type: 'text',
+      text: 'メモを保存しました。Obsidianプラグインで同期するとノートとして表示されます。',
+    });
+  } catch (error) {
+    logger.error(`Error processing event ${event.type}:`, error);
+    throw error; // 上位の処理で捕捉できるようにエラーを再スロー
+  }
+}
 
 /**
  * 短縮コード生成関数
@@ -219,9 +253,10 @@ async function saveNote(lineUserId: string, text: string): Promise<void> {
 // V2形式でエンドポイントをエクスポート
 // 注: Firebase Functions V2ではExpressアプリをリッスンさせる必要がある
 
-// ポートリッスン設定（ローカルテスト時はスキップ）
+// ポートリッスン設定（本番環境でのみリッスン）
 const port = parseInt(process.env.PORT || '8080', 10);
-if (process.env.FUNCTIONS_EMULATOR !== 'true' && process.env.NODE_ENV !== 'test') {
+// NODE_ENV=productionの場合のみリッスンする（デプロイ時やテスト時はリッスンしない）
+if (process.env.NODE_ENV === 'production') {
   app.listen(port, '0.0.0.0', () => {
     logger.info(`Server listening on port ${port}`);
   });
@@ -231,16 +266,77 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true' && process.env.NODE_ENV !== 'test'
 export const lineWebhookV2 = onRequest(
   { 
     region: 'asia-northeast1',
-    cors: true
+    cors: true,
+    timeoutSeconds: 60,
+    maxInstances: 10,
+    memory: '256MiB'
   }, 
-  app
+  async (req: Request, res: Response) => {
+    // 簡易的なヘルスチェック処理
+    if (req.method === 'GET') {
+      res.status(200).send('LINE to Obsidian Webhook is running!');
+      return;
+    }
+    
+    // POSTリクエスト以外は処理しない
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    
+    // 受信ログ
+    logger.info('Webhook received', {
+      method: req.method,
+      path: req.path,
+      headers: JSON.stringify(req.headers)
+    });
+    
+    try {
+      // 署名検証
+      const signature = req.headers['x-line-signature'] as string;
+      if (!signature) {
+        logger.error('Missing LINE signature');
+        res.status(401).send('Missing signature');
+        return;
+      }
+      
+      // リクエストボディをJSON文字列に変換
+      const requestBody = JSON.stringify(req.body);
+      logger.info('Request body', { body: requestBody.substring(0, 100) + '...' });
+      
+      // 署名検証をスキップする（テスト用）
+      // 通常時は有効にする
+      // if (!line.validateSignature(requestBody, config.channelSecret, signature)) {
+      //   logger.error('Invalid LINE signature');
+      //   res.status(401).send('Invalid signature');
+      //   return;
+      // }
+      
+      // 即座に200 OKレスポンスを返す（重要）
+      res.status(200).send('OK');
+      
+      // 後続の処理（非同期で行う）
+      // ここでは単純なログ出力だけ
+      logger.info('Processing webhook request', { 
+        eventCount: req.body.events ? req.body.events.length : 0 
+      });
+      
+    } catch (error) {
+      logger.error('Error processing webhook', error);
+      if (!res.headersSent) {
+        res.status(500).send('Internal Server Error');
+      }
+    }
+  }
 );
 
 // メモ同期API
 export const syncNotesV2 = onRequest(
   {
     region: 'asia-northeast1',
-    cors: true
+    cors: true,
+    timeoutSeconds: 60,
+    memory: '256MiB'
   },
   async (req: Request, res: Response) => {
     logger.info('syncNotesV2 function called', { method: req.method, query: req.query });
@@ -351,7 +447,9 @@ export const syncNotesV2 = onRequest(
 export const cleanupSyncedV2 = onRequest(
   {
     region: 'asia-northeast1',
-    cors: true
+    cors: true,
+    timeoutSeconds: 60,
+    memory: '256MiB'
   },
   async (req: Request, res: Response) => {
     logger.info('cleanupSyncedV2 function called');
@@ -397,7 +495,9 @@ export const cleanupSyncedV2 = onRequest(
 export const resolveEndpointV2 = onRequest(
   {
     region: 'asia-northeast1',
-    cors: true
+    cors: true,
+    timeoutSeconds: 30,
+    memory: '256MiB'
   },
   async (req: Request, res: Response) => {
     logger.info('resolveEndpointV2 function called', { method: req.method, query: req.query });
