@@ -4,12 +4,12 @@
 
 ## フェーズ1: バックエンド構築 (Firebase)
 
--   [/] Firebaseプロジェクト作成と設定
+-   [x] Firebaseプロジェクト作成と設定
     -   [x] プロジェクト作成
-    -   [ ] Blazeプラン有効化
+    -   [x] Blazeプラン有効化
     -   [x] Firestoreデータベース作成
     -   [x] Firebase CLI初期化（Firestore, Functions, Emulators）
--   [/] Firestoreコレクション設計とセキュリティルール設定
+-   [x] Firestoreコレクション設計とセキュリティルール設定
     -   [x] `mappings` コレクション設計・ルール設定
     -   [x] `notes` コレクション設計・ルール設定
 -   [x] Cloud Functions実装 (`functions/`)
@@ -31,10 +31,10 @@
         -   [x] 定期実行トリガー設定 (HTTP関数として実装)
         -   [x] 古い同期済みメモの削除ロジック
         -   [x] エラーハンドリングとロギング
--   [/] Cloud Functionsデプロイと動作確認
-    -   [/] 環境変数設定 (LINEチャネルシークレット等)
-    -   [ ] 各関数のデプロイ
-    -   [ ] Postman等でのエンドポイントテスト
+-   [x] Cloud Functionsデプロイと動作確認
+    -   [x] 環境変数設定 (LINEチャネルシークレット等)
+    -   [x] 各関数のデプロイ
+    -   [x] Postman等でのエンドポイントテスト
 
 ## フェーズ2: フロントエンド構築 (Obsidian Plugin)
 

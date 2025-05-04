@@ -1,10 +1,9 @@
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import * as line from '@line/bot-sdk';
 import express from 'express';
 import cors from 'cors';
 import { Request, Response } from 'express';
-import { onRequest } from 'firebase-functions/v2/https';
 
 // Firebaseの初期化
 admin.initializeApp();
@@ -270,14 +269,170 @@ app.get('/cleanupSynced', async (req: Request, res: Response) => {
   }
 });
 
-// Firebase 2nd Gen用のエクスポート
-export const api = onRequest({ region: 'asia-northeast1' }, app); 
+// Firebase Functions v1形式でエンドポイントを個別にエクスポート
+export const lineWebhook = functions.region('asia-northeast1').https.onRequest(async (req: Request, res: Response) => {
+  // Functionsのパスはベースパスを含まないため、明示的なパスチェックは不要
+  // Cloud Functions v1では自動的に正しいルーティングが行われる
+  if (req.path === '/') {
+    // POSTメソッドのみ受け付ける
+    if (req.method === 'POST') {
+      // lineWebhookエンドポイントへのリクエストをアプリに渡す
+      return app(req, res);
+    } else {
+      res.status(405).send('Method Not Allowed: POSTメソッドのみ受け付けています');
+    }
+  } else {
+    // 他のパスへのリクエストは404を返す
+    res.status(404).send('Not Found');
+  }
+});
 
-// 開発環境と本番環境で分岐
-// 本番環境（Cloud Run）のみでポートリッスンを行う
-if (process.env.NODE_ENV !== 'development' && process.env.K_SERVICE) {
-  const port = process.env.PORT || 8080;
-  app.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
-  });
-} 
+export const syncNotes = functions.region('asia-northeast1').https.onRequest(async (req: Request, res: Response) => {
+  // Functionsのパスはベースパスを含まないため、明示的なパスチェックは不要
+  if (req.path === '/') {
+    // GETメソッドのみ受け付ける
+    if (req.method === 'GET') {
+      // syncNotesの処理を直接実行
+      console.log('syncNotes function called', req.method, req.query);
+      
+      // 認証チェック
+      const authHeader = req.headers.authorization;
+      console.log('Authorization header:', authHeader);
+      
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        res.status(401).send('Unauthorized');
+        return;
+      }
+
+      try {
+        // トークンからLineUserIdを取得
+        const mappingId = req.query.token as string || '';
+        console.log('MappingId from token param:', mappingId);
+        
+        if (!mappingId) {
+          res.status(400).send('Missing token parameter');
+          return;
+        }
+
+        // マッピング情報を取得して認証
+        const mappingDoc = await db.collection('mappings').doc(mappingId).get();
+        if (!mappingDoc.exists) {
+          res.status(404).send('Mapping not found');
+          return;
+        }
+
+        const mappingData = mappingDoc.data();
+        if (!mappingData) {
+          res.status(500).send('Internal Server Error');
+          return;
+        }
+
+        const lineUserId = mappingData.lineUserId;
+        console.log('Found lineUserId:', lineUserId);
+
+        // タイムスタンプフィルタ用のsinceパラメータを処理
+        let sinceTimestamp = null;
+        if (req.query.since) {
+          sinceTimestamp = new Date(Number(req.query.since as string));
+          console.log('Since timestamp:', sinceTimestamp);
+        }
+
+        // 未同期のメモを取得
+        let notesQuery = db.collection('notes')
+          .where('lineUserId', '==', lineUserId)
+          .where('synced', '==', false);
+        
+        if (sinceTimestamp) {
+          notesQuery = notesQuery.where('createdAt', '>=', sinceTimestamp);
+        }
+
+        const notesSnapshot = await notesQuery.get();
+        console.log('Found notes count:', notesSnapshot.size);
+        
+        // レスポンス用のデータを構築
+        const notes = notesSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            content: data.text,
+            created: data.createdAt ? data.createdAt.toDate().getTime() : Date.now(),
+          };
+        });
+
+        // 同期済みフラグを更新
+        const batch = db.batch();
+        notesSnapshot.docs.forEach(doc => {
+          batch.update(doc.ref, { synced: true });
+        });
+        await batch.commit();
+
+        // JSON形式でレスポンス
+        res.status(200).json(notes);
+      } catch (error) {
+        console.error('Error syncing notes:', error);
+        functions.logger.error('Error syncing notes:', error);
+        if (error instanceof Error) {
+          res.status(500).send(`Internal Server Error: ${error.message}`);
+        } else {
+          res.status(500).send('An unexpected error occurred during sync.');
+        }
+      }
+    } else {
+      res.status(405).send('Method Not Allowed: GETメソッドのみ受け付けています');
+    }
+  } else {
+    // 他のパスへのリクエストは404を返す
+    res.status(404).send('Not Found');
+  }
+});
+
+export const cleanupSynced = functions.region('asia-northeast1').https.onRequest(async (req: Request, res: Response) => {
+  // Functionsのパスはベースパスを含まないため、明示的なパスチェックは不要
+  if (req.path === '/') {
+    // GETメソッドのみ受け付ける
+    if (req.method === 'GET') {
+      console.log('cleanupSynced function called');
+      
+      try {
+        // 30日以上前の同期済みメモを取得
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - 30);
+        
+        const oldNotesSnapshot = await db.collection('notes')
+          .where('synced', '==', true)
+          .where('createdAt', '<', cutoffDate)
+          .get();
+        
+        if (oldNotesSnapshot.empty) {
+          functions.logger.info('No old synced notes to cleanup');
+          res.status(200).send('No old synced notes to cleanup');
+          return;
+        }
+        
+        // 一括削除
+        const batch = db.batch();
+        oldNotesSnapshot.docs.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        await batch.commit();
+        
+        const message = `Cleaned up ${oldNotesSnapshot.size} old synced notes`;
+        functions.logger.info(message);
+        res.status(200).send(message);
+      } catch (error) {
+        console.error('Error cleaning up synced notes:', error);
+        functions.logger.error('Error cleaning up synced notes:', error);
+        if (error instanceof Error) {
+          res.status(500).send(`Error cleaning up synced notes: ${error.message}`);
+        } else {
+          res.status(500).send('An unexpected error occurred during cleanup.');
+        }
+      }
+    } else {
+      res.status(405).send('Method Not Allowed: GETメソッドのみ受け付けています');
+    }
+  } else {
+    // 他のパスへのリクエストは404を返す
+    res.status(404).send('Not Found');
+  }
+}); 
