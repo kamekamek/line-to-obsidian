@@ -19,11 +19,6 @@ const config = {
 // LINEクライアントの初期化
 const lineClient = new line.Client(config);
 
-// アジアリージョン（東京）のオプション設定
-const regionOpts = {
-  region: 'asia-northeast1'
-};
-
 // Express アプリケーションのセットアップ
 const app = express();
 app.use(cors());
@@ -277,3 +272,12 @@ app.get('/cleanupSynced', async (req: Request, res: Response) => {
 
 // Firebase 2nd Gen用のエクスポート
 export const api = onRequest({ region: 'asia-northeast1' }, app); 
+
+// 開発環境と本番環境で分岐
+// 本番環境（Cloud Run）のみでポートリッスンを行う
+if (process.env.NODE_ENV !== 'development' && process.env.K_SERVICE) {
+  const port = process.env.PORT || 8080;
+  app.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+  });
+} 
