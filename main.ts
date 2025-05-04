@@ -76,7 +76,7 @@ export default class LineToObsidianPlugin extends Plugin {
 			let apiUrl = '';
 			
 			try {
-				const resolveEndpointUrl = `https://asia-northeast1-line-obsidian-notes-sync.cloudfunctions.net/resolveEndpoint?code=${encodeURIComponent(this.settings.shortCode)}`;
+				const resolveEndpointUrl = `https://asia-northeast1-line-obsidian-notes-sync.cloudfunctions.net/resolveEndpointV2?code=${encodeURIComponent(this.settings.shortCode)}`;
 				console.log('解決URL:', resolveEndpointUrl);
 				
 				const response = await fetch(resolveEndpointUrl);
@@ -184,8 +184,11 @@ export default class LineToObsidianPlugin extends Plugin {
 				try {
 					console.log('ノート処理開始:', { id: note.id, timestamp: note.timestamp });
 					
-					// ファイル名を生成（日時+テキスト先頭から10文字）
-					const dateStr = new Date(note.timestamp || Date.now()).toISOString().split('T')[0];
+					// タイムスタンプをJST(Asia/Tokyo)に変換
+					const timestamp = new Date(note.timestamp || Date.now());
+					// JSTでのフォーマット用の日付文字列を生成（9時間追加）
+					const jstTimestamp = new Date(timestamp.getTime() + 9 * 60 * 60 * 1000);
+					const dateStr = jstTimestamp.toISOString().split('T')[0];
 					const textPreview = note.text.substring(0, 10).replace(/[\\/:*?"<>|]/g, '_');
 					const fileName = `${dateStr} ${textPreview}.md`;
 					
@@ -193,7 +196,7 @@ export default class LineToObsidianPlugin extends Plugin {
 					const filePath = `${folderPath}/${fileName}`;
 					console.log('生成ファイルパス:', filePath);
 					
-					// ファイル内容
+					// ファイル内容（タイムスタンプはそのままISOフォーマットで保存）
 					const content = `---
 created: ${new Date(note.timestamp || Date.now()).toISOString()}
 source: LINE

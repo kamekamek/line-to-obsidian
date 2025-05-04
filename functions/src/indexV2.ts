@@ -477,7 +477,7 @@ export const syncNotesV2 = onRequest(
     region: 'asia-northeast1',
     cors: true,
     timeoutSeconds: 60,
-    memory: '256MiB'
+    memory: '512MiB'
   },
   async (req: Request, res: Response) => {
     logger.info('syncNotesV2 function called', { method: req.method, query: req.query });
@@ -638,7 +638,7 @@ export const resolveEndpointV2 = onRequest(
     region: 'asia-northeast1',
     cors: true,
     timeoutSeconds: 30,
-    memory: '256MiB'
+    memory: '512MiB'
   },
   async (req: Request, res: Response) => {
     logger.info('resolveEndpointV2 function called', { method: req.method, query: req.query });
