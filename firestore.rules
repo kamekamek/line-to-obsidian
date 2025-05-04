@@ -1,0 +1,22 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // mappingsコレクションのセキュリティルール
+    match /mappings/{mappingId} {
+      // Cloud Functionsのみがマッピングを作成・更新可能
+      allow create, update: if false;
+      // 認証されたユーザーのみが読み取り可能
+      allow read: if false;
+      // 管理者用に後で適切な認証を追加
+    }
+    
+    // notesコレクションのセキュリティルール
+    match /notes/{noteId} {
+      // Cloud Functionsのみがノートを作成・更新可能
+      allow create, update, delete: if false;
+      // 認証されたユーザーのみが読み取り可能
+      allow read: if false;
+      // 管理者用に後で適切な認証を追加
+    }
+  }
+} 

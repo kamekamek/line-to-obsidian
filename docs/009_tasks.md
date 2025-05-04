@@ -4,34 +4,35 @@
 
 ## フェーズ1: バックエンド構築 (Firebase)
 
--   [ ] Firebaseプロジェクト作成と設定
-    -   [ ] プロジェクト作成
+-   [/] Firebaseプロジェクト作成と設定
+    -   [x] プロジェクト作成
     -   [ ] Blazeプラン有効化
-    -   [ ] Firestoreデータベース作成
--   [ ] Firestoreコレクション設計とセキュリティルール設定
-    -   [ ] `mappings` コレクション設計・ルール設定
-    -   [ ] `notes` コレクション設計・ルール設定
--   [ ] Cloud Functions実装 (`functions/`)
-    -   [ ] 開発環境セットアップ (TypeScript, npm, Firebase CLI)
-    -   [ ] `lineWebhook` 関数の実装
-        -   [ ] LINE SDK (`@line/bot-sdk`) 導入
-        -   [ ] 署名検証ロジック実装
-        -   [ ] `#登録` メッセージ処理 (Firestore `mappings` 書き込み)
-        -   [ ] テキストメモ保存処理 (Firestore `notes` 書き込み)
-        -   [ ] エラーハンドリングとロギング
-    -   [ ] `syncNotes` 関数の実装
-        -   [ ] Bearerトークン認証ロジック実装
-        -   [ ] `mappings` から `lineUserId` 取得ロジック
-        -   [ ] `notes` から未同期メモ取得クエリ (sinceパラメータ対応)
-        -   [ ] JSONレスポンス生成
-        -   [ ] 同期後処理 (`synced` 更新 or 削除)
-        -   [ ] エラーハンドリングとロギング
-    -   [ ] `cleanupSynced` 関数の実装
-        -   [ ] 定期実行トリガー設定 (Cloud Scheduler)
-        -   [ ] 古い同期済みメモの削除ロジック
-        -   [ ] エラーハンドリングとロギング
--   [ ] Cloud Functionsデプロイと動作確認
-    -   [ ] 環境変数設定 (LINEチャネルシークレット等)
+    -   [x] Firestoreデータベース作成
+    -   [x] Firebase CLI初期化（Firestore, Functions, Emulators）
+-   [/] Firestoreコレクション設計とセキュリティルール設定
+    -   [x] `mappings` コレクション設計・ルール設定
+    -   [x] `notes` コレクション設計・ルール設定
+-   [x] Cloud Functions実装 (`functions/`)
+    -   [x] 開発環境セットアップ (TypeScript, npm, Firebase CLI)
+    -   [x] `lineWebhook` 関数の実装
+        -   [x] LINE SDK (`@line/bot-sdk`) 導入
+        -   [x] 署名検証ロジック実装
+        -   [x] `#登録` メッセージ処理 (Firestore `mappings` 書き込み)
+        -   [x] テキストメモ保存処理 (Firestore `notes` 書き込み)
+        -   [x] エラーハンドリングとロギング
+    -   [x] `syncNotes` 関数の実装
+        -   [x] Bearerトークン認証ロジック実装
+        -   [x] `mappings` から `lineUserId` 取得ロジック
+        -   [x] `notes` から未同期メモ取得クエリ (sinceパラメータ対応)
+        -   [x] JSONレスポンス生成
+        -   [x] 同期後処理 (`synced` 更新 or 削除)
+        -   [x] エラーハンドリングとロギング
+    -   [x] `cleanupSynced` 関数の実装
+        -   [x] 定期実行トリガー設定 (HTTP関数として実装)
+        -   [x] 古い同期済みメモの削除ロジック
+        -   [x] エラーハンドリングとロギング
+-   [/] Cloud Functionsデプロイと動作確認
+    -   [/] 環境変数設定 (LINEチャネルシークレット等)
     -   [ ] 各関数のデプロイ
     -   [ ] Postman等でのエンドポイントテスト
 
