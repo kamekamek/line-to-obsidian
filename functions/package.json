@@ -1,7 +1,7 @@
 {
   "name": "functions",
   "version": "1.0.0",
-  "main": "lib/index.js",
+  "main": "lib/indexV2.js",
   "scripts": {
     "build": "tsc",
     "lint": "echo 'No linting configured'",
@@ -24,6 +24,6 @@
     "typescript": "^5.8.3"
   },
   "engines": {
-    "node": "18"
+    "node": "20"
   }
 }
