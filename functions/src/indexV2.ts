@@ -16,20 +16,64 @@ const config = {
   channelSecret: process.env.LINE_CHANNEL_SECRET || 'dummy_secret_for_testing',
 };
 
+// LINE Bot設定のログ記録（デバッグ用）
+logger.info('LINE Bot config initialized', { 
+  hasToken: !!config.channelAccessToken,
+  hasSecret: !!config.channelSecret,
+  isProduction: process.env.NODE_ENV === 'production'
+});
+
 // LINEクライアントの初期化（エミュレータ環境でも動作するように）
 let lineClient: line.Client | any;
 try {
+  logger.info('Initializing LINE client with config', { 
+    hasToken: !!config.channelAccessToken,
+    hasSecret: !!config.channelSecret,
+    tokenFirstChars: config.channelAccessToken ? config.channelAccessToken.substring(0, 5) + '...' : 'none',
+    tokenLength: config.channelAccessToken ? config.channelAccessToken.length : 0
+  });
+  
+  if (!config.channelAccessToken || config.channelAccessToken === 'dummy_token_for_testing') {
+    throw new Error('LINE Channel Access Token is not properly configured');
+  }
+  
   lineClient = new line.Client(config);
+  
+  // テスト用の簡易メッセージ送信
+  /* 
+  // 実際のリクエストではなくログのみ出力する場合はコメントアウトを外す
+  lineClient.pushMessage('testuser', {
+    type: 'text',
+    text: 'LINE Client test message'
+  }).then(() => {
+    logger.info('Test LINE message sent successfully');
+  }).catch(err => {
+    logger.warn('Test LINE message failed', err);
+  });
+  */
+  
   logger.log('LINE Client initialized successfully');
 } catch (error) {
-  logger.warn('LINE Client initialization failed. Using dummy client for testing.', error);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  logger.error('LINE Client initialization failed', {
+    error: error,
+    errorMessage: error instanceof Error ? error.message : 'Unknown error',
+    errorName: error instanceof Error ? error.name : 'Unknown error type'
+  });
+  
+  // モッククライアントを作成
   lineClient = {
-    replyMessage: async () => {
-      logger.info('[MOCK] LINE message reply called');
+    replyMessage: async (replyToken: string, message: any) => {
+      logger.info('[MOCK] LINE message reply called', { replyToken, message });
+      logger.warn('Using mock LINE client - message will not be sent to LINE');
+      return Promise.resolve(null);
+    },
+    pushMessage: async (userId: string, message: any) => {
+      logger.info('[MOCK] LINE push message called', { userId, message });
+      logger.warn('Using mock LINE client - message will not be sent to LINE');
       return Promise.resolve(null);
     }
   };
+  logger.warn('Using mock LINE client instead of real client');
 }
 
 // Express アプリケーションのセットアップ
@@ -102,11 +146,15 @@ async function processEvent(event: line.WebhookEvent): Promise<void> {
   try {
     // メッセージイベントのみ処理
     if (event.type !== 'message' || event.message.type !== 'text') {
+      logger.info('Event is not a text message', { eventType: event.type });
       return;
     }
 
     const { text } = event.message;
     const { userId } = event.source;
+    const replyToken = event.replyToken;
+
+    logger.info('Processing message event', { text, userId, replyToken });
 
     if (!userId) {
       logger.error('User ID not found');
@@ -115,26 +163,65 @@ async function processEvent(event: line.WebhookEvent): Promise<void> {
 
     // "#登録" コマンドの処理
     if (text.trim() === '#登録') {
-      const mappingId = await handleRegistration(userId);
+      logger.info('Processing registration command');
       
-      // マッピング情報を取得して短縮コードを取得
-      const mappingDoc = await db.collection('mappings').doc(mappingId).get();
-      const mappingData = mappingDoc.data();
-      const connectionCode = mappingData?.connectionCode || '';
-      
-      await lineClient.replyMessage(event.replyToken, {
-        type: 'text',
-        text: `登録が完了しました。これからメモを送ると自動的にObsidianに同期できるようになります。\n\n接続コード: ${connectionCode}\n認証トークン: ${mappingId}\n\nObsidianプラグインの設定画面で接続コードと認証トークンを入力してください。`,
-      });
-      return;
+      try {
+        const mappingId = await handleRegistration(userId);
+        logger.info('Registration successful', { mappingId, userId });
+        
+        // マッピング情報を取得して短縮コードを取得
+        const mappingDoc = await db.collection('mappings').doc(mappingId).get();
+        const mappingData = mappingDoc.data();
+        const connectionCode = mappingData?.connectionCode || '';
+        
+        const responseMessage = {
+          type: 'text',
+          text: `登録が完了しました。これからメモを送ると自動的にObsidianに同期できるようになります。\n\n接続コード: ${connectionCode}\n認証トークン: ${mappingId}\n\nObsidianプラグインの設定画面で接続コードと認証トークンを入力してください。`,
+        };
+        
+        logger.info('Sending registration response', { 
+          connectionCode, 
+          mappingId,
+          replyToken,
+          responseMessage: JSON.stringify(responseMessage)
+        });
+        
+        // 応答処理をtry-catchで囲む
+        try {
+          await lineClient.replyMessage(replyToken, responseMessage);
+          logger.info('Registration response sent successfully');
+        } catch (replyError) {
+          logger.error('Failed to send LINE reply message', { 
+            error: replyError,
+            errorMessage: replyError instanceof Error ? replyError.message : 'Unknown error',
+            responseMessage: JSON.stringify(responseMessage)
+          });
+        }
+        
+        return;
+      } catch (regError) {
+        logger.error('Error in registration process', regError);
+        throw regError;
+      }
     }
 
     // 通常のメッセージをメモとして保存
+    logger.info('Saving note', { userId, textLength: text.length });
     await saveNote(userId, text);
-    await lineClient.replyMessage(event.replyToken, {
-      type: 'text',
-      text: 'メモを保存しました。Obsidianプラグインで同期するとノートとして表示されます。',
-    });
+    
+    logger.info('Sending save confirmation');
+    try {
+      await lineClient.replyMessage(replyToken, {
+        type: 'text',
+        text: 'メモを保存しました。Obsidianプラグインで同期するとノートとして表示されます。',
+      });
+      logger.info('Save confirmation sent successfully');
+    } catch (replyError) {
+      logger.error('Failed to send save confirmation', { 
+        error: replyError,
+        errorMessage: replyError instanceof Error ? replyError.message : 'Unknown error'
+      });
+    }
   } catch (error) {
     logger.error(`Error processing event ${event.type}:`, error);
     throw error; // 上位の処理で捕捉できるようにエラーを再スロー
@@ -274,7 +361,8 @@ export const lineWebhookV2 = onRequest(
     cors: true,
     timeoutSeconds: 60,
     maxInstances: 10,
-    memory: '256MiB'
+    memory: '256MiB',
+    secrets: ['LINE_CHANNEL_ACCESS_TOKEN', 'LINE_CHANNEL_SECRET']
   }, 
   async (req: Request, res: Response) => {
     // 簡易的なヘルスチェック処理
@@ -283,12 +371,10 @@ export const lineWebhookV2 = onRequest(
       return;
     }
     
-    // すべてのリクエストに即座に200 OKを返す（デバッグ用）
-    res.status(200).send('OK');
-    
     // POSTリクエスト以外は処理しない
     if (req.method !== 'POST') {
       logger.info('非POSTリクエスト受信', { method: req.method });
+      res.status(405).send('Method Not Allowed');
       return;
     }
     
@@ -304,14 +390,83 @@ export const lineWebhookV2 = onRequest(
       const requestBody = JSON.stringify(req.body);
       logger.info('Request body', { body: requestBody.substring(0, 100) + '...' });
       
-      // 後続の処理（非同期で行う）
-      // ここでは単純なログ出力だけ
-      logger.info('Processing webhook request', { 
-        eventCount: req.body.events ? req.body.events.length : 0 
-      });
+      // 署名検証の実行
+      const signature = req.headers['x-line-signature'] as string;
+      if (!signature) {
+        logger.error('Missing LINE signature');
+        
+        // 開発環境では署名がなくても処理を続行
+        if (process.env.NODE_ENV === 'production') {
+          res.status(401).send('Missing signature');
+          return;
+        } else {
+          logger.warn('Skipping signature verification in development environment');
+        }
+      } else {
+        // 署名検証
+        try {
+          const isValid = line.validateSignature(requestBody, config.channelSecret, signature);
+          if (!isValid) {
+            logger.error('Invalid LINE signature');
+            
+            // 開発環境では署名検証に失敗しても処理を続行
+            if (process.env.NODE_ENV === 'production') {
+              res.status(401).send('Invalid signature');
+              return;
+            } else {
+              logger.warn('Invalid signature, but continuing in development environment');
+            }
+          } else {
+            logger.info('Signature verification successful');
+          }
+        } catch (signError) {
+          logger.error('Error during signature verification', { 
+            error: signError,
+            errorMessage: signError instanceof Error ? signError.message : 'Unknown error'
+          });
+          
+          // 開発環境ではエラーがあっても処理を続行
+          if (process.env.NODE_ENV === 'production') {
+            res.status(401).send('Signature verification error');
+            return;
+          } else {
+            logger.warn('Signature verification error, but continuing in development environment');
+          }
+        }
+      }
+      
+      // 即座に200 OKレスポンスを返す（重要）
+      res.status(200).send('OK');
+      
+      // 以降の処理はバックグラウンドで実行
+      const events: line.WebhookEvent[] = req.body.events || [];
+      logger.info(`Processing ${events.length} events`);
+      
+      // リクエストの内容をログに表示（デバッグ用）
+      if (events.length > 0) {
+        logger.info('Event details', { 
+          firstEvent: JSON.stringify(events[0]),
+          eventTypes: events.map(e => e.type).join(', ')
+        });
+      }
+      
+      // 各イベントを非同期で処理（結果を待たない）
+      for (const event of events) {
+        try {
+          logger.info(`Processing event of type: ${event.type}`);
+          await processEvent(event);
+          logger.info(`Successfully processed event: ${event.type}`);
+        } catch (err) {
+          logger.error(`Event processing error for event: ${JSON.stringify(event)}`, err);
+        }
+      }
       
     } catch (error) {
       logger.error('Error processing webhook', error);
+      // レスポンスがまだ送信されていない場合のみエラーレスポンスを返す
+      if (!res.headersSent) {
+        res.status(500).send('Internal Server Error');
+      }
     }
   }
 );
