@@ -86,6 +86,68 @@ app.post('/lineWebhook', async (req: Request, res: Response) => {
 });
 
 /**
+ * 短縮コード生成関数
+ * @returns 生成された短縮コード
+ */
+function generateShortCode(): string {
+  // 6文字のランダム英数字コードを生成
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  const length = 6;
+  
+  for (let i = 0; i < length; i++) {
+    const randomIndex = Math.floor(Math.random() * characters.length);
+    result += characters.charAt(randomIndex);
+  }
+  
+  return result;
+}
+
+/**
+ * 短縮コード生成と保存処理
+ * @returns 生成された短縮コード
+ */
+async function createConnectionCode(): Promise<string> {
+  try {
+    // プロジェクトIDを取得
+    const projectId = process.env.GCLOUD_PROJECT || '';
+    
+    // 短縮コードを生成
+    let shortCode = generateShortCode();
+    let attempts = 0;
+    const maxAttempts = 5;
+    
+    // コードの重複チェックと再生成（必要に応じて）
+    while (attempts < maxAttempts) {
+      const codeDoc = await db.collection('connection_codes').doc(shortCode).get();
+      if (!codeDoc.exists) {
+        break;
+      }
+      shortCode = generateShortCode();
+      attempts++;
+    }
+    
+    if (attempts >= maxAttempts) {
+      throw new Error('短縮コードの生成に失敗しました。');
+    }
+    
+    // Firestoreに保存
+    await db.collection('connection_codes').doc(shortCode).set({
+      projectId,
+      projectName: 'LINE to Obsidian Sync',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      expiresAt: null,  // 有効期限なし（必要に応じて設定可能）
+    });
+    
+    functions.logger.info(`Connection code created: ${shortCode} for project: ${projectId}`);
+    return shortCode;
+  } catch (error) {
+    functions.logger.error('Connection code creation error:', error);
+    throw error;
+  }
+}
+
+/**
  * ユーザー登録処理
  * @param lineUserId LINE UserID
  * @returns mappingId 生成されたマッピングID
@@ -95,13 +157,17 @@ async function handleRegistration(lineUserId: string): Promise<string> {
     // ユニークなマッピングIDを生成
     const mappingId = admin.firestore().collection('mappings').doc().id;
     
+    // 短縮コードを生成（接続用）
+    const connectionCode = await createConnectionCode();
+    
     // マッピング情報をFirestoreに保存
     await db.collection('mappings').doc(mappingId).set({
       lineUserId,
+      connectionCode,  // 短縮コードへの参照を追加
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     
-    functions.logger.info(`User registered: ${lineUserId} with mapping ID: ${mappingId}`);
+    functions.logger.info(`User registered: ${lineUserId} with mapping ID: ${mappingId} and connection code: ${connectionCode}`);
     return mappingId;
   } catch (error) {
     functions.logger.error(`Registration error for user ${lineUserId}:`, error);
@@ -305,9 +371,15 @@ export const lineWebhook = functions.region('asia-northeast1').https.onRequest(a
         // "#登録" コマンドの処理
         if (text.trim() === '#登録') {
           const mappingId = await handleRegistration(userId);
+          
+          // マッピング情報を取得して短縮コードを取得
+          const mappingDoc = await db.collection('mappings').doc(mappingId).get();
+          const mappingData = mappingDoc.data();
+          const connectionCode = mappingData?.connectionCode || '';
+          
           await lineClient.replyMessage(event.replyToken, {
             type: 'text',
-            text: `登録が完了しました。これからメモを送ると自動的にObsidianに同期できるようになります。\n\nあなたの認証トークンは: ${mappingId}\n\nこのトークンをObsidianプラグインの設定画面に入力してください。`,
+            text: `登録が完了しました。これからメモを送ると自動的にObsidianに同期できるようになります。\n\n接続コード: ${connectionCode}\n認証トークン: ${mappingId}\n\nObsidianプラグインの設定画面で接続コードと認証トークンを入力してください。`,
           });
           return;
         }
@@ -483,5 +555,76 @@ export const cleanupSynced = functions.region('asia-northeast1').https.onRequest
   } else {
     // 他のパスへのリクエストは404を返す
     res.status(404).send('Not Found');
+  }
+});
+
+// 新しいエンドポイント解決関数を追加
+export const resolveEndpoint = functions.region('asia-northeast1').https.onRequest(async (req: Request, res: Response) => {
+  console.log('resolveEndpoint function called', req.method, req.query);
+  
+  // CORS設定
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  
+  // OPTIONSリクエスト（プリフライトリクエスト）への応答
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+  
+  // GETメソッドのみ受け付ける
+  if (req.method !== 'GET') {
+    res.status(405).send('Method Not Allowed: GETメソッドのみ受け付けています');
+    return;
+  }
+  
+  const code = req.query.code as string;
+  
+  if (!code) {
+    res.status(400).json({
+      success: false,
+      error: 'Connection code is required'
+    });
+    return;
+  }
+  
+  try {
+    // Firestoreから短縮コードを検索
+    const codeDoc = await db.collection('connection_codes').doc(code).get();
+      
+    if (!codeDoc.exists) {
+      res.status(404).json({
+        success: false,
+        error: 'Invalid connection code'
+      });
+      return;
+    }
+    
+    const codeData = codeDoc.data();
+    if (!codeData) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch connection code data'
+      });
+      return;
+    }
+    
+    const projectId = codeData.projectId;
+    
+    // エンドポイントURLを生成して返す
+    res.status(200).json({
+      success: true,
+      endpoint: `https://asia-northeast1-${projectId}.cloudfunctions.net/syncNotes`,
+      projectName: codeData.projectName || 'LINE to Obsidian Sync'
+    });
+  } catch (error) {
+    console.error('Error resolving endpoint:', error);
+    functions.logger.error('Error resolving endpoint:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
   }
 }); 

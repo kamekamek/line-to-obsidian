@@ -2,6 +2,8 @@ import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Set
 
 interface LineToObsidianSettings {
 	apiEndpoint: string;
+	projectId: string;  // Firebase プロジェクトID
+	shortCode: string;  // LINE登録時に提供された短縮コード
 	authToken: string;
 	syncFolderPath: string;
 	lastSync: number | null;
@@ -10,6 +12,8 @@ interface LineToObsidianSettings {
 
 const DEFAULT_SETTINGS: LineToObsidianSettings = {
 	apiEndpoint: '',
+	projectId: '',
+	shortCode: '',
 	authToken: '',
 	syncFolderPath: 'LINE Memos',
 	lastSync: null,
@@ -54,8 +58,8 @@ export default class LineToObsidianPlugin extends Plugin {
 	}
 
 	async syncNotes() {
-		if (!this.settings.apiEndpoint) {
-			new Notice('API Endpoint URLが設定されていません。');
+		if (!this.settings.apiEndpoint && !this.settings.projectId && !this.settings.shortCode) {
+			new Notice('APIエンドポイントURLまたはプロジェクトID/短縮コードが設定されていません。');
 			return;
 		}
 
@@ -67,7 +71,38 @@ export default class LineToObsidianPlugin extends Plugin {
 		try {
 			new Notice('LINE メモの同期を開始します...');
 
-			let url = this.settings.apiEndpoint;
+			// エンドポイントURLの構築
+			let apiUrl = '';
+			
+			if (this.settings.apiEndpoint) {
+				// 直接URLが設定されている場合はそれを使用
+				apiUrl = this.settings.apiEndpoint;
+			} else if (this.settings.shortCode) {
+				// 短縮コードがある場合はエンドポイント解決APIを使用
+				try {
+					const resolveEndpointUrl = `https://us-central1-line-obsidian-notes-sync.cloudfunctions.net/resolveEndpoint?code=${encodeURIComponent(this.settings.shortCode)}`;
+					const response = await fetch(resolveEndpointUrl);
+					
+					if (!response.ok) {
+						throw new Error(`短縮コードからエンドポイントの解決に失敗しました: ${response.status} ${response.statusText}`);
+					}
+					
+					const data = await response.json();
+					if (!data.success || !data.endpoint) {
+						throw new Error('無効な短縮コードです。正しいコードを入力してください。');
+					}
+					
+					apiUrl = data.endpoint;
+				} catch (resolveError) {
+					console.error('エンドポイント解決エラー:', resolveError);
+					throw new Error(`短縮コードからのエンドポイント解決に失敗しました: ${resolveError.message}`);
+				}
+			} else if (this.settings.projectId) {
+				// プロジェクトIDから直接構築
+				apiUrl = `https://us-central1-${this.settings.projectId}.cloudfunctions.net/syncNotes`;
+			}
+
+			let url = apiUrl;
 			if (this.settings.lastSync) {
 				url += `?authToken=${encodeURIComponent(this.settings.authToken)}&since=${this.settings.lastSync}`;
 			} else {
@@ -353,8 +388,66 @@ class LineToObsidianSettingTab extends PluginSettingTab {
 
 		containerEl.empty();
 		containerEl.createEl('h2', {text: 'LINE to Obsidian 設定'});
+		
+		const apiSettingDiv = containerEl.createDiv('api-settings');
+		apiSettingDiv.createEl('h3', {text: '接続設定'});
+		
+		new Setting(apiSettingDiv)
+			.setName('接続方法')
+			.setDesc('LINEメモとの同期方法を選択してください。')
+			.addDropdown(dropdown => {
+				dropdown
+					.addOption('shortcode', '短縮コードを使用 (推奨)')
+					.addOption('projectid', 'プロジェクトIDを使用')
+					.addOption('direct', 'エンドポイントURLを直接入力')
+					.setValue(
+						this.plugin.settings.shortCode ? 'shortcode' :
+						this.plugin.settings.projectId ? 'projectid' : 
+						'direct'
+					)
+					.onChange(async (value) => {
+						// 設定欄の表示/非表示を切り替え
+						const shortCodeSetting = containerEl.querySelector('.shortcode-setting') as HTMLElement;
+						const projectIdSetting = containerEl.querySelector('.projectid-setting') as HTMLElement;
+						const directUrlSetting = containerEl.querySelector('.direct-url-setting') as HTMLElement;
+						
+						if (shortCodeSetting && projectIdSetting && directUrlSetting) {
+							shortCodeSetting.style.display = value === 'shortcode' ? 'block' : 'none';
+							projectIdSetting.style.display = value === 'projectid' ? 'block' : 'none';
+							directUrlSetting.style.display = value === 'direct' ? 'block' : 'none';
+						}
+					});
+			});
 
-		new Setting(containerEl)
+		// 短縮コード設定
+		const shortCodeSetting = new Setting(apiSettingDiv)
+			.setClass('shortcode-setting')
+			.setName('短縮コード')
+			.setDesc('LINEボットから提供された接続コードを入力してください。')
+			.addText(text => text
+				.setPlaceholder('例: ABC123')
+				.setValue(this.plugin.settings.shortCode)
+				.onChange(async (value) => {
+					this.plugin.settings.shortCode = value;
+					await this.plugin.saveSettings();
+				}));
+		
+		// プロジェクトID設定
+		const projectIdSetting = new Setting(apiSettingDiv)
+			.setClass('projectid-setting')
+			.setName('Firebase プロジェクトID')
+			.setDesc('LINE to Obsidian連携用のFirebaseプロジェクトIDを入力してください。')
+			.addText(text => text
+				.setPlaceholder('例: line-obsidian-notes-sync')
+				.setValue(this.plugin.settings.projectId)
+				.onChange(async (value) => {
+					this.plugin.settings.projectId = value;
+					await this.plugin.saveSettings();
+				}));
+				
+		// 直接URL設定（従来の方法）
+		const directUrlSetting = new Setting(apiSettingDiv)
+			.setClass('direct-url-setting')
 			.setName('API Endpoint URL')
 			.setDesc('同期に使用するCloud Functionsの syncNotes 関数のURL。')
 			.addText(text => text
@@ -364,6 +457,21 @@ class LineToObsidianSettingTab extends PluginSettingTab {
 					this.plugin.settings.apiEndpoint = value;
 					await this.plugin.saveSettings();
 				}));
+				
+		// 初期表示を設定
+		if (this.plugin.settings.shortCode) {
+			(shortCodeSetting.settingEl as HTMLElement).style.display = 'block';
+			(projectIdSetting.settingEl as HTMLElement).style.display = 'none';
+			(directUrlSetting.settingEl as HTMLElement).style.display = 'none';
+		} else if (this.plugin.settings.projectId) {
+			(shortCodeSetting.settingEl as HTMLElement).style.display = 'none';
+			(projectIdSetting.settingEl as HTMLElement).style.display = 'block';
+			(directUrlSetting.settingEl as HTMLElement).style.display = 'none';
+		} else {
+			(shortCodeSetting.settingEl as HTMLElement).style.display = 'none';
+			(projectIdSetting.settingEl as HTMLElement).style.display = 'none';
+			(directUrlSetting.settingEl as HTMLElement).style.display = 'block';
+		}
 
 		new Setting(containerEl)
 			.setName('Authentication Token')
