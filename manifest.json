@@ -1,0 +1,11 @@
+{
+	"id": "line-to-obsidian",
+	"name": "LINE to Obsidian (Beta)",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "LINEのメッセージをWebhookで受信し、Obsidianのノートとして同期するプラグインです。トークン認証により、特定のLINEユーザーとObsidian Vaultを紐付けます。",
+	"author": "Nagare Kameno",
+	"authorUrl": "https://github.com/kamekamek",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
