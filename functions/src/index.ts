@@ -107,12 +107,15 @@ app.post('/lineWebhook', async (req: Request, res: Response) => {
     logger.info('Request body', { body: requestBody.substring(0, 100) + '...' });
     
     // 署名検証をスキップする（テスト用）
-    // 通常時は有効にする
-    /* if (!line.validateSignature(requestBody, config.channelSecret, signature)) {
-      logger.error('Invalid LINE signature');
-      res.status(401).send('Invalid signature');
-      return;
-    } */
+    if (process.env.NODE_ENV === 'production') {
+      if (!line.validateSignature(requestBody, config.channelSecret, signature)) {
+        logger.error('Invalid LINE signature');
+        res.status(401).send('Invalid signature');
+        return;
+      }
+    } else {
+      logger.warn('Skipping signature verification in non-production environment');
+    }
     
     // すぐに200 OKを返す（タイムアウト防止のため最優先）
     res.status(200).send('OK');
