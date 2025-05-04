@@ -39,6 +39,18 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: "main.js",
 	minify: prod,
+	plugins: [
+		{
+			name: 'exclude-functions',
+			setup(build) {
+				// functions ディレクトリ以下のファイルを除外
+				build.onResolve({ filter: /^functions\/.*/ }, args => ({
+					path: args.path,
+					external: true,
+				}));
+			},
+		},
+	],
 });
 
 if (prod) {
