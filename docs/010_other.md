@@ -44,3 +44,58 @@ Firebase FunctionsとObsidianプラグイン間でタイムゾーンの不一致
 4. **実装方法**
    - サーバー側（Firebase）でタイムスタンプをISO文字列として保存し、タイムゾーン情報を含める
    - クライアント側で`new Date()`使用時にタイムゾーンを考慮した変換を行う
+
+## その他の設定
+
+## Cloud Schedulerによるクリーンアップジョブの設定
+
+クリーンアップ機能を定期的に実行するために、Cloud Schedulerを設定します。以下の2つのジョブを設定することで、データベースを自動的にメンテナンスします。
+
+### 1. 同期済みメモのクリーンアップ (毎日実行)
+
+このジョブは、30日以上経過した同期済みメモを自動的に削除します。
+
+1. Google Cloud Consoleで「Cloud Scheduler」ページに移動
+2. 「ジョブを作成」をクリック
+3. 以下の情報を入力:
+   - 名前: `cleanup-synced-notes-daily`
+   - 説明: `古い同期済みメモを毎日クリーンアップする`
+   - 頻度: `0 0 * * *` (毎日0時に実行)
+   - タイムゾーン: `Asia/Tokyo`
+   - ターゲット:
+     - タイプ: `HTTP`
+     - URL: `https://asia-northeast1-[PROJECT_ID].cloudfunctions.net/cleanupSynced`
+     - HTTP メソッド: `GET`
+     - ヘッダー: 不要
+   - リトライ設定: 
+     - リトライ回数: `3`
+     - 最大リトライ時間: `600s`
+4. 「作成」をクリック
+
+### 2. 古い接続コードのクリーンアップ (毎月実行)
+
+このジョブは、90日以上経過した接続コードを自動的に削除します。
+
+1. Google Cloud Consoleで「Cloud Scheduler」ページに移動
+2. 「ジョブを作成」をクリック
+3. 以下の情報を入力:
+   - 名前: `cleanup-connection-codes-monthly`
+   - 説明: `古い接続コードを毎月クリーンアップする`
+   - 頻度: `0 0 1 * *` (毎月1日0時に実行)
+   - タイムゾーン: `Asia/Tokyo`
+   - ターゲット:
+     - タイプ: `HTTP`
+     - URL: `https://asia-northeast1-[PROJECT_ID].cloudfunctions.net/cleanupOldConnectionCodes`
+     - HTTP メソッド: `GET`
+     - ヘッダー: 不要
+   - リトライ設定: 
+     - リトライ回数: `3`
+     - 最大リトライ時間: `600s`
+4. 「作成」をクリック
+
+## 注意事項
+
+- `[PROJECT_ID]` は実際のFirebaseプロジェクトIDに置き換えてください。
+- これらのジョブを設定する前に、対応するCloud Functions (`cleanupSynced` と `cleanupOldConnectionCodes`) がデプロイされていることを確認してください。
+- 必要に応じて実行頻度を調整できます。例えば、メモ量が多い場合は同期済みメモのクリーンアップをより頻繁に実行するなど。
+- これらのジョブを正しく構成するには、Firebaseプロジェクトに対する適切な権限が必要です。

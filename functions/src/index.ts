@@ -300,6 +300,21 @@ async function createConnectionCode(): Promise<string> {
  */
 async function handleRegistration(lineUserId: string): Promise<string> {
   try {
+    // 既存のマッピングを検索
+    const existingMappingsQuery = await db.collection('mappings')
+      .where('lineUserId', '==', lineUserId)
+      .get();
+    
+    // 既存のマッピングを削除（バッチ処理）
+    if (!existingMappingsQuery.empty) {
+      const batch = db.batch();
+      existingMappingsQuery.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+      logger.info(`Deleted ${existingMappingsQuery.size} existing mappings for user: ${lineUserId}`);
+    }
+    
     // ユニークなマッピングIDを生成
     const mappingId = admin.firestore().collection('mappings').doc().id;
     
@@ -709,6 +724,53 @@ export const resolveEndpoint = onRequest(
         success: false,
         error: 'Internal server error'
       });
+    }
+  }
+);
+
+// 古い接続コードのクリーンアップ
+export const cleanupOldConnectionCodes = onRequest(
+  {
+    region: 'asia-northeast1',
+    cors: true,
+    timeoutSeconds: 60,
+    memory: '256MiB'
+  },
+  async (req: Request, res: Response) => {
+    logger.info('cleanupOldConnectionCodes function called');
+    
+    try {
+      // 90日以上前の接続コードを取得
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - 90);
+      
+      const oldCodesSnapshot = await db.collection('connection_codes')
+        .where('createdAt', '<', cutoffDate)
+        .get();
+      
+      if (oldCodesSnapshot.empty) {
+        logger.info('No old connection codes to cleanup');
+        res.status(200).send('No old connection codes to cleanup');
+        return;
+      }
+      
+      // 一括削除
+      const batch = db.batch();
+      oldCodesSnapshot.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+      
+      const message = `Cleaned up ${oldCodesSnapshot.size} old connection codes`;
+      logger.info(message);
+      res.status(200).send(message);
+    } catch (error) {
+      logger.error('Error cleaning up old connection codes:', error);
+      if (error instanceof Error) {
+        res.status(500).send(`Error cleaning up old connection codes: ${error.message}`);
+      } else {
+        res.status(500).send('An unexpected error occurred during cleanup.');
+      }
     }
   }
 ); 
