@@ -62,6 +62,59 @@ Container Healthcheck failed. The user-provided container failed to start and li
 - `lineWebhook`, `syncNotes`, `cleanupSynced` としてそれぞれデプロイ
 - アクセスパスは自動的に設定（例: `/syncNotes`）
 
+## 一般的なV2デプロイ問題と対処法
+
+V2（Cloud Run関数）でよく発生する問題と対処法をまとめます。特に以下のエラーが発生した場合の対応策です：
+
+```
+Container called exit(1)
+Default STARTUP TCP probe failed [...] consecutively for container "worker" on port 8080
+```
+
+これらのエラーは、コンテナが起動直後に終了し、Cloud Runのスタートアッププローブがポート8080での接続を検出できないことを示しています。
+
+### 1. アプリケーションの即時クラッシュ（exit(1)）
+
+#### 可能性のある原因：
+- **依存モジュールの読み込み失敗**: npm installの実行漏れやモジュール不足
+- **エントリポイントの誤り**: package.jsonのmain設定やDockerfileのCMD/ENTRYPOINTの誤設定
+
+#### 対策：
+- `firebase emulators:start --only functions`を実行し、例外スタックトレースを確認
+- Dockerコンテナを手動起動し、ログを確認
+
+### 2. ポート未リッスンによるプローブ失敗
+
+#### 可能性のある原因：
+- **環境変数PORT非対応**: 固定ポート指定やローカルホストのみのリッスン
+- **ネットワークインターフェース誤設定**: 127.0.0.1でのみリッスンし、外部からアクセス不可
+
+#### 対策：
+- Expressアプリの場合は、明示的にインターフェースとポートを指定：
+  ```javascript
+  const port = process.env.PORT || 8080;
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Listening on ${port}`);
+  });
+  ```
+- Firebase Functions V2では`onRequest()`を使用して自動バインド
+
+### 3. コンテナイメージの互換性問題
+
+#### 可能性のある原因：
+- **プラットフォーム・アーキテクチャ不整合**: ARM/x86_64のミスマッチ
+
+#### 対策：
+- Cloud Buildでマルチプラットフォーム対応のビルドを設定
+- `docker buildx build --platform=linux/amd64`でAMD64イメージを生成
+
+### 4. その他の考慮点
+
+- **起動時間の最適化**: 初期化処理を軽量化
+- **ファイルシステムの文字コード**: UTF-8を使用
+- **環境変数/Secretsの設定確認**
+- **Cloud Runリソース制限の調整**: CPUやメモリ不足による終了を防止
+
 ## 将来の展望
 
 将来的にNodeランタイムのアップグレードが必要な場合（現在はNode.js 18）、V2への移行を再検討する必要があります。その際は：
