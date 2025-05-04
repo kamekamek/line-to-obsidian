@@ -90,24 +90,35 @@ export default class LineToObsidianPlugin extends Plugin {
 				throw new Error('APIからの応答が不正です。');
 			}
 
-			if (!(await this.app.vault.adapter.exists(this.settings.syncFolderPath))) {
-				await this.app.vault.createFolder(this.settings.syncFolderPath);
+			const safePath = this.normalizePath(this.settings.syncFolderPath);
+			if (!(await this.app.vault.adapter.exists(safePath))) {
+				await this.app.vault.createFolder(safePath);
 			}
 
 			let successCount = 0;
+			let latestTimestamp = 0;
+			
 			for (const note of data) {
 				try {
 					const timestamp = new Date(note.created);
-					const fileName = `${this.settings.syncFolderPath}/${this.formatDate(timestamp)}.md`;
+					const noteTimestamp = timestamp.getTime();
+					
+					if (noteTimestamp > latestTimestamp) {
+						latestTimestamp = noteTimestamp;
+					}
+					
+					const fileName = `${safePath}/${this.formatDate(timestamp)}.md`;
 					await this.app.vault.create(fileName, note.content);
 					successCount++;
 				} catch (e) {
 					console.error(`メモの保存に失敗しました: ${e}`);
 				}
 			}
-
-			this.settings.lastSync = Date.now();
-			await this.saveSettings();
+			
+			if (successCount > 0 && latestTimestamp > 0) {
+				this.settings.lastSync = latestTimestamp;
+				await this.saveSettings();
+			}
 
 			new Notice(`${successCount}件のLINEメモを同期しました。`);
 		} catch (error) {
@@ -123,8 +134,18 @@ export default class LineToObsidianPlugin extends Plugin {
 		const hours = date.getHours().toString().padStart(2, '0');
 		const minutes = date.getMinutes().toString().padStart(2, '0');
 		const seconds = date.getSeconds().toString().padStart(2, '0');
+		const milliseconds = date.getMilliseconds().toString().padStart(3, '0');
 		
-		return `${year}${month}${day}${hours}${minutes}${seconds}`;
+		return `${year}${month}${day}${hours}${minutes}${seconds}${milliseconds}`;
+	}
+	
+	/**
+	 * Normalize and validate a path to prevent path traversal attacks
+	 */
+	normalizePath(path: string): string {
+		const normalizedPath = path.replace(/\.\.\//g, '').replace(/\.\//g, '');
+		
+		return normalizedPath.replace(/^\/+/g, '');
 	}
 }
 
