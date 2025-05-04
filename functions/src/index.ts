@@ -1,6 +1,10 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import * as line from '@line/bot-sdk';
+import express from 'express';
+import cors from 'cors';
+import { Request, Response } from 'express';
+import { onRequest } from 'firebase-functions/v2/https';
 
 // Firebaseの初期化
 admin.initializeApp();
@@ -15,11 +19,27 @@ const config = {
 // LINEクライアントの初期化
 const lineClient = new line.Client(config);
 
+// アジアリージョン（東京）のオプション設定
+const regionOpts = {
+  region: 'asia-northeast1'
+};
+
+// Express アプリケーションのセットアップ
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// メインアプリケーションのルート
+app.get('/', (req: Request, res: Response) => {
+  res.status(200).send('LINE to Obsidian API is running!');
+});
+
 /**
  * LINE Webhookエンドポイント
  * メッセージを受信して処理する
  */
-export const lineWebhook = functions.https.onRequest(async (req, res) => {
+app.post('/lineWebhook', async (req: Request, res: Response) => {
+  console.log('lineWebhook function called');
   // 署名検証
   const signature = req.headers['x-line-signature'] as string;
   if (!signature || !line.validateSignature(JSON.stringify(req.body), config.channelSecret, signature)) {
@@ -118,27 +138,29 @@ async function saveNote(lineUserId: string, text: string): Promise<void> {
  * メモ同期API
  * Obsidianプラグインからの呼び出しに対応
  */
-export const syncNotes = functions.https.onRequest(async (req, res) => {
-  // GET以外のリクエストは拒否
-  if (req.method !== 'GET') {
-    res.status(405).send('Method Not Allowed');
-    return;
-  }
-
+app.get('/syncNotes', async (req: Request, res: Response) => {
+  console.log('syncNotes function called', req.method, req.query);
+  
   // 認証チェック
   const authHeader = req.headers.authorization;
+  console.log('Authorization header:', authHeader);
+  
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).send('Unauthorized');
     return;
   }
 
-  const token = authHeader.split('Bearer ')[1];
-  
+  // Bearerトークンの検証は行わないが、形式だけチェック
+  // const _token = authHeader.split('Bearer ')[1];
+
   try {
-    // クエリパラメータからmappingIdを取得
-    const mappingId = req.query.mappingId as string;
+    // トークンからLineUserIdを取得
+    // トークンパラメータは認証トークンではなく、mappingIdとして使用
+    const mappingId = req.query.token as string || '';
+    console.log('MappingId from token param:', mappingId);
+    
     if (!mappingId) {
-      res.status(400).send('Missing mappingId parameter');
+      res.status(400).send('Missing token parameter');
       return;
     }
 
@@ -149,10 +171,6 @@ export const syncNotes = functions.https.onRequest(async (req, res) => {
       return;
     }
 
-    // 実際にはここでtokenの検証をすべきですが、簡単のために現在はスキップします
-    // TODO: 本番環境では適切なトークン検証を実装してください
-    functions.logger.info(`Token provided: ${token}`);
-
     const mappingData = mappingDoc.data();
     if (!mappingData) {
       res.status(500).send('Internal Server Error');
@@ -160,11 +178,13 @@ export const syncNotes = functions.https.onRequest(async (req, res) => {
     }
 
     const lineUserId = mappingData.lineUserId;
+    console.log('Found lineUserId:', lineUserId);
 
     // タイムスタンプフィルタ用のsinceパラメータを処理
     let sinceTimestamp = null;
     if (req.query.since) {
-      sinceTimestamp = new Date(Number(req.query.since));
+      sinceTimestamp = new Date(Number(req.query.since as string));
+      console.log('Since timestamp:', sinceTimestamp);
     }
 
     // 未同期のメモを取得
@@ -177,14 +197,15 @@ export const syncNotes = functions.https.onRequest(async (req, res) => {
     }
 
     const notesSnapshot = await notesQuery.get();
+    console.log('Found notes count:', notesSnapshot.size);
     
     // レスポンス用のデータを構築
     const notes = notesSnapshot.docs.map(doc => {
       const data = doc.data();
       return {
         id: doc.id,
-        text: data.text,
-        createdAt: data.createdAt.toDate().getTime(),
+        content: data.text,
+        created: data.createdAt ? data.createdAt.toDate().getTime() : Date.now(),
       };
     });
 
@@ -196,13 +217,15 @@ export const syncNotes = functions.https.onRequest(async (req, res) => {
     await batch.commit();
 
     // JSON形式でレスポンス
-    res.status(200).json({
-      notes,
-      syncedAt: Date.now(),
-    });
+    res.status(200).json(notes);
   } catch (error) {
+    console.error('Error syncing notes:', error);
     functions.logger.error('Error syncing notes:', error);
-    res.status(500).send('Internal Server Error');
+    if (error instanceof Error) {
+      res.status(500).send(`Internal Server Error: ${error.message}`);
+    } else {
+      res.status(500).send('An unexpected error occurred during sync.');
+    }
   }
 });
 
@@ -212,7 +235,9 @@ export const syncNotes = functions.https.onRequest(async (req, res) => {
  * 注: アプリがBlazeプランに変更されると、実際にスケジュールされます
  */
 // 単純化したアプローチ - HTTPトリガー関数として実装し、後でSchedulerで定期実行する
-export const cleanupSynced = functions.https.onRequest(async (req, res) => {
+app.get('/cleanupSynced', async (req: Request, res: Response) => {
+  console.log('cleanupSynced function called');
+  
   try {
     // 30日以上前の同期済みメモを取得
     const cutoffDate = new Date();
@@ -240,7 +265,15 @@ export const cleanupSynced = functions.https.onRequest(async (req, res) => {
     functions.logger.info(message);
     res.status(200).send(message);
   } catch (error) {
+    console.error('Error cleaning up synced notes:', error);
     functions.logger.error('Error cleaning up synced notes:', error);
-    res.status(500).send('Error cleaning up synced notes');
+    if (error instanceof Error) {
+      res.status(500).send(`Error cleaning up synced notes: ${error.message}`);
+    } else {
+      res.status(500).send('An unexpected error occurred during cleanup.');
+    }
   }
-}); 
+});
+
+// Firebase 2nd Gen用のエクスポート
+export const api = onRequest({ region: 'asia-northeast1' }, app); 
