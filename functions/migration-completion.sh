@@ -30,7 +30,7 @@ cp src/indexV2.ts src/index.ts
 
 # デプロイ
 echo "新しい関数をデプロイしています..."
-firebase deploy --only functions:lineWebhook,functions:syncNotes,functions:cleanupSynced,functions:resolveEndpoint,functions:cleanupOldConnectionCodes
+firebase deploy --only functions:lineWebhook,functions:syncNotes,functions:cleanupSynced,functions:resolveEndpoint,functions:cleanupOldConnectionCodes,functions:cleanupOldMappings
 
 if [ $? -ne 0 ]; then
   echo "新関数のデプロイに失敗しました。バックアップから復元して再試行してください。"

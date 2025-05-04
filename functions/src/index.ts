@@ -773,4 +773,51 @@ export const cleanupOldConnectionCodes = onRequest(
       }
     }
   }
+);
+
+// 古いマッピング情報のクリーンアップ
+export const cleanupOldMappings = onRequest(
+  {
+    region: 'asia-northeast1',
+    cors: true,
+    timeoutSeconds: 60,
+    memory: '256MiB'
+  },
+  async (req: Request, res: Response) => {
+    logger.info('cleanupOldMappings function called');
+    
+    try {
+      // 90日以上前のマッピング情報を取得
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - 90);
+      
+      const oldMappingsSnapshot = await db.collection('mappings')
+        .where('createdAt', '<', cutoffDate)
+        .get();
+      
+      if (oldMappingsSnapshot.empty) {
+        logger.info('No old mappings to cleanup');
+        res.status(200).send('No old mappings to cleanup');
+        return;
+      }
+      
+      // 一括削除
+      const batch = db.batch();
+      oldMappingsSnapshot.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+      
+      const message = `Cleaned up ${oldMappingsSnapshot.size} old mappings`;
+      logger.info(message);
+      res.status(200).send(message);
+    } catch (error) {
+      logger.error('Error cleaning up old mappings:', error);
+      if (error instanceof Error) {
+        res.status(500).send(`Error cleaning up old mappings: ${error.message}`);
+      } else {
+        res.status(500).send('An unexpected error occurred during cleanup.');
+      }
+    }
+  }
 ); 
