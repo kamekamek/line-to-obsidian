@@ -90,24 +90,100 @@ export default class LineToObsidianPlugin extends Plugin {
 				throw new Error('APIからの応答が不正です。');
 			}
 
-			if (!(await this.app.vault.adapter.exists(this.settings.syncFolderPath))) {
-				await this.app.vault.createFolder(this.settings.syncFolderPath);
+			const safePath = this.normalizePath(this.settings.syncFolderPath);
+			if (!(await this.app.vault.adapter.exists(safePath))) {
+				await this.app.vault.createFolder(safePath);
+			}
+
+			// APIレスポンスの詳細検証
+			if (!data) {
+				throw new Error('APIからの応答が空です。');
+			}
+			
+			if (!Array.isArray(data)) {
+				throw new Error('APIからの応答が配列形式ではありません。');
+			}
+			
+			// 各ノートの構造検証
+			for (const note of data) {
+				if (!note.content) {
+					console.warn('コンテンツがないノートをスキップします。');
+				}
+				if (!note.created || isNaN(new Date(note.created).getTime())) {
+					console.warn('作成日が無効なノートをスキップします。');
+				}
+			}
+			
+			// 安全なパスの取得と検証
+			try {
+				var safePath = this.normalizePath(this.settings.syncFolderPath);
+				if (!(await this.app.vault.adapter.exists(safePath))) {
+					await this.app.vault.createFolder(safePath);
+				}
+			} catch (pathError) {
+				console.error('パス処理エラー:', pathError);
+				throw new Error(`同期フォルダのパスが無効です: ${pathError.message}`);
 			}
 
 			let successCount = 0;
+			let latestTimestamp = 0;
+			let failedNotes = [];
+			
 			for (const note of data) {
 				try {
+					// 日付の検証
+					if (!note.created || isNaN(new Date(note.created).getTime())) {
+						failedNotes.push({
+							reason: '無効な日付',
+							content: note.content ? note.content.substring(0, 30) + '...' : 'コンテンツなし'
+						});
+						continue;
+					}
+					
 					const timestamp = new Date(note.created);
-					const fileName = `${this.settings.syncFolderPath}/${this.formatDate(timestamp)}.md`;
-					await this.app.vault.create(fileName, note.content);
-					successCount++;
+					const noteTimestamp = timestamp.getTime();
+					
+					if (noteTimestamp > latestTimestamp) {
+						latestTimestamp = noteTimestamp;
+					}
+					
+					// ファイル名生成と保存
+					try {
+						const fileName = `${safePath}/${this.formatDate(timestamp)}.md`;
+						await this.app.vault.create(fileName, note.content || '');
+						successCount++;
+					} catch (fileError) {
+						console.error(`ファイル作成エラー: ${fileError.message}`);
+						failedNotes.push({
+							reason: `ファイル作成エラー: ${fileError.message}`,
+							content: note.content ? note.content.substring(0, 30) + '...' : 'コンテンツなし',
+							date: timestamp.toLocaleString()
+						});
+					}
 				} catch (e) {
-					console.error(`メモの保存に失敗しました: ${e}`);
+					console.error(`メモ処理エラー: ${e.message}`);
+					failedNotes.push({
+						reason: `処理エラー: ${e.message}`,
+						content: note.content ? note.content.substring(0, 30) + '...' : 'コンテンツなし'
+					});
 				}
 			}
+			
+			// 失敗したノートがある場合の詳細ログ
+			if (failedNotes.length > 0) {
+				console.warn(`${failedNotes.length}件のノート保存に失敗:`, failedNotes);
+				new Notice(`警告: ${failedNotes.length}件のノート保存に失敗しました。コンソールで詳細を確認できます。`);
+			}
 
-			this.settings.lastSync = Date.now();
-			await this.saveSettings();
+			if (successCount > 0 && latestTimestamp > 0) {
+				this.settings.lastSync = latestTimestamp;
+				try {
+					await this.saveSettings();
+				} catch (settingsError) {
+					console.error('設定保存エラー:', settingsError);
+					new Notice('警告: 同期タイムスタンプの保存に失敗しました。次回の同期で重複したノートが同期される可能性があります。');
+				}
+			}
 
 			new Notice(`${successCount}件のLINEメモを同期しました。`);
 		} catch (error) {
@@ -123,8 +199,65 @@ export default class LineToObsidianPlugin extends Plugin {
 		const hours = date.getHours().toString().padStart(2, '0');
 		const minutes = date.getMinutes().toString().padStart(2, '0');
 		const seconds = date.getSeconds().toString().padStart(2, '0');
+		const milliseconds = date.getMilliseconds().toString().padStart(3, '0');
 		
-		return `${year}${month}${day}${hours}${minutes}${seconds}`;
+		// UUID部分を生成して追加（短縮版）
+		const uuid = this.generateShortUUID();
+		
+		return `${year}${month}${day}${hours}${minutes}${seconds}${milliseconds}-${uuid}`;
+	}
+
+	/**
+	 * 短縮版のUUIDを生成
+	 * @returns ファイル名に適した短いランダム文字列
+	 */
+	generateShortUUID(): string {
+		// ランダムな16進数文字列を生成（8文字）
+		return Math.random().toString(36).substring(2, 10);
+	}
+	
+	/**
+	 * パスを安全に正規化して検証する関数
+	 * - 不正な文字（Windows禁止文字など）の検出
+	 * - パストラバーサル攻撃の防止
+	 * - 空パスに対するデフォルト値の提供
+	 * @param path 正規化する生のパス文字列
+	 * @returns 安全に正規化されたパス
+	 * @throws エラー: 無効な文字やパストラバーサル試行を検出した場合
+	 */
+	normalizePath(path: string): string {
+		// 不正な文字を含むパスを拒否
+		const invalidCharsRegex = /[<>:"\\|?*\x00-\x1F]/g;
+		if (invalidCharsRegex.test(path)) {
+			throw new Error('パスに無効な文字が含まれています');
+		}
+		
+		// パスを分解して各セグメントを検証
+		const segments = path.split('/').filter(segment => segment.length > 0);
+		
+		// 上位ディレクトリ参照（..）を含むセグメントを検出して拒否
+		const hasParentDirRef = segments.some(segment => 
+			segment === '..' || 
+			segment.startsWith('../') || 
+			segment.endsWith('/..') || 
+			segment.includes('/../')
+		);
+		
+		if (hasParentDirRef) {
+			throw new Error('パスに上位ディレクトリ参照（..）が含まれています');
+		}
+		
+		// 現在のディレクトリ参照（.）を含むセグメントを除去
+		const cleanSegments = segments.filter(segment => segment !== '.');
+		
+		// 安全なパスを再構築
+		let safePath = cleanSegments.join('/');
+		
+		// 末尾のスラッシュを除去
+		safePath = safePath.replace(/\/+$/g, '');
+		
+		// 空のパスの場合はデフォルト値を返す
+		return safePath.length > 0 ? safePath : 'LINE Memos';
 	}
 }
 
