@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "line-obsidian-notes-sync"
-  }
+    "default": "line-obsidian-notes-sync",
+    "firebase use --add line-obsidian-notes-sync-test --alias test": "line-obsidian-notes-sync"
+  },
+  "targets": {},
+  "etags": {}
 }
