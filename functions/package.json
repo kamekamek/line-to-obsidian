@@ -25,5 +25,11 @@
   },
   "engines": {
     "node": "20"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "eslint": "^9.26.0",
+    "eslint-plugin-import": "^2.31.0"
   }
 }

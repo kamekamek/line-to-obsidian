@@ -1,24 +1,35 @@
 {
-	"name": "obsidian-sample-plugin",
+	"name": "functions",
 	"version": "1.0.0",
-	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
-	"main": "main.js",
+	"description": "",
+	"main": "lib/indexV2.js",
 	"scripts": {
-		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"version": "node version-bump.mjs && git add manifest.json versions.json"
+		"build": "tsc",
+		"lint": "eslint --ext .js,.ts .",
+		"serve": "npm run build && firebase emulators:start --only functions",
+		"shell": "npm run build && firebase functions:shell",
+		"start": "npm run shell",
+		"deploy": "firebase deploy --only functions",
+		"logs": "firebase functions:log"
 	},
 	"keywords": [],
 	"author": "",
-	"license": "MIT",
+	"license": "ISC",
+	"dependencies": {
+		"@line/bot-sdk": "^9.9.0",
+		"cors": "^2.8.5",
+		"express": "^4.18.2",
+		"firebase-admin": "^13.3.0",
+		"firebase-functions": "^6.3.2",
+		"typescript": "^5.8.3"
+	},
 	"devDependencies": {
-		"@types/node": "^16.11.6",
-		"@typescript-eslint/eslint-plugin": "5.29.0",
-		"@typescript-eslint/parser": "5.29.0",
-		"builtin-modules": "3.3.0",
-		"esbuild": "0.17.3",
-		"obsidian": "latest",
-		"tslib": "2.4.0",
-		"typescript": "4.7.4"
+		"eslint": "^8.56.0",
+		"eslint-plugin-import": "^2.29.1",
+		"@typescript-eslint/eslint-plugin": "^7.2.0",
+		"@typescript-eslint/parser": "^7.2.0"
+	},
+	"engines": {
+		"node": "20"
 	}
 }
