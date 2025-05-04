@@ -40,25 +40,34 @@
 -   [ ] Obsidianプラグイン開発環境セットアップ (`obsidian-sample-plugin/`)
     -   [ ] テンプレートからの初期化
     -   [ ] 依存関係インストール (npm)
--   [ ] 設定画面の実装 (`main.ts`)
-    -   [ ] API Endpoint URL入力フィールド
-    -   [ ] Authentication Token入力フィールド (パスワード形式)
-    -   [ ] Sync Folder Path入力フィールド
-    -   [ ] Last Sync Timestamp表示 (読み取り専用)
-    -   [ ] 設定値の保存・読み込みロジック
--   [ ] 同期コマンドの実装 (`main.ts`)
-    -   [ ] コマンドパレットへの登録
-    -   [ ] 設定画面への「Sync Now」ボタン追加
-    -   [ ] `syncNotes` API呼び出しロジック (fetch API)
-        -   [ ] Bearerトークン付与
-        -   [ ] `since` パラメータ付与 (lastSync利用)
-    -   [ ] レスポンス解析 (JSON)
-    -   [ ] メモデータのMarkdownファイル書き込みロジック (Obsidian API `vault.create`)
-        -   [ ] ファイル名生成ルール
-        -   [ ] 指定フォルダへの保存
-    -   [ ] `lastSync` タイムスタンプ更新ロジック
-    -   [ ] エラーハンドリングとユーザー通知 (Obsidian API `Notice`)
+-   [x] 設定画面の実装 (`main.ts`)
+    -   [x] API Endpoint URL入力フィールド
+    -   [x] Authentication Token入力フィールド (パスワード形式)
+    -   [x] Sync Folder Path入力フィールド
+    -   [x] Last Sync Timestamp表示 (読み取り専用)
+    -   [x] 設定値の保存・読み込みロジック
+-   [x] 同期コマンドの実装 (`main.ts`)
+    -   [x] コマンドパレットへの登録
+    -   [x] 設定画面への「Sync Now」ボタン追加
+    -   [x] `syncNotes` API呼び出しロジック (fetch API)
+        -   [x] Bearerトークン付与
+        -   [x] `since` パラメータ付与 (lastSync利用)
+    -   [x] レスポンス解析 (JSON)
+    -   [x] メモデータのMarkdownファイル書き込みロジック (Obsidian API `vault.create`)
+        -   [x] ファイル名生成ルール
+        -   [x] 指定フォルダへの保存
+    -   [x] `lastSync` タイムスタンプ更新ロジック
+    -   [x] エラーハンドリングとユーザー通知 (Obsidian API `Notice`)
 -   [ ] プラグインビルドとローカルテスト
+
+## フェーズ2.5: 課題修正 (優先度高)
+
+-   [ ] [必須] ファイル名衝突の修正 (ミリ秒やUUID等で一意性を保証 / 関連: `008_core.md` のファイル名生成ルール, `main.ts`)
+-   [ ] [必須] Path Traversal 脆弱性の対策 (パス正規化・検証 / 関連: `main.ts`)
+-   [ ] [必須] `lastSync` 更新ロジック修正 (失敗時は更新しない、APIデータ基準のタイムスタンプ使用 / 関連: `main.ts`)
+-   [ ] [推奨] APIエラーハンドリング詳細化 (関連: `main.ts`)
+-   [ ] [推奨] 個別ノート保存失敗時の通知改善 (関連: `main.ts`)
+-   [ ] [任意] セキュリティ: 認証トークンの保存方法検討
 
 ## フェーズ3: テストとドキュメント
 
