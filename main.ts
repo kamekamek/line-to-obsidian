@@ -5,13 +5,15 @@ interface LineToObsidianSettings {
 	authToken: string;
 	syncFolderPath: string;
 	lastSync: number | null;
+	syncedNoteIds: string[];
 }
 
 const DEFAULT_SETTINGS: LineToObsidianSettings = {
 	apiEndpoint: '',
 	authToken: '',
 	syncFolderPath: 'LINE Memos',
-	lastSync: null
+	lastSync: null,
+	syncedNoteIds: []
 }
 
 export default class LineToObsidianPlugin extends Plugin {
@@ -67,30 +69,44 @@ export default class LineToObsidianPlugin extends Plugin {
 
 			let url = this.settings.apiEndpoint;
 			if (this.settings.lastSync) {
-				url += `?token=${encodeURIComponent(this.settings.authToken)}&since=${this.settings.lastSync}`;
+				url += `?authToken=${encodeURIComponent(this.settings.authToken)}&since=${this.settings.lastSync}`;
 			} else {
-				url += `?token=${encodeURIComponent(this.settings.authToken)}`;
+				url += `?authToken=${encodeURIComponent(this.settings.authToken)}`;
 			}
 
-			const response = await fetch(url, {
-				method: 'GET',
-				headers: {
-					'Authorization': `Bearer ${this.settings.authToken}`,
-					'Content-Type': 'application/json'
-				}
-			});
+			console.log('Requesting URL:', url);
+
+			let response;
+			try {
+				response = await fetch(url, {
+					method: 'GET',
+					mode: 'cors',
+					headers: {
+						'Authorization': `Bearer ${this.settings.authToken}`,
+						'Content-Type': 'application/json'
+					}
+				});
+			} catch (fetchError) {
+				console.error('Fetch error:', fetchError);
+				throw new Error(`ネットワークエラー: ${fetchError.message || 'APIサーバーに接続できません'}`);
+			}
+
+			console.log('Response status:', response.status, response.statusText);
 
 			if (!response.ok) {
-				throw new Error(`APIリクエストが失敗しました: ${response.status} ${response.statusText}`);
+				const responseText = await response.text();
+				console.error('Response body:', responseText);
+				throw new Error(`APIリクエストが失敗しました: ${response.status} ${response.statusText} - ${responseText}`);
 			}
 
 			const data = await response.json();
+			console.log('Response data:', data);
 			
 			if (!data || !Array.isArray(data)) {
 				throw new Error('APIからの応答が不正です。');
 			}
 
-			const safePath = this.normalizePath(this.settings.syncFolderPath);
+			let safePath = this.normalizePath(this.settings.syncFolderPath);
 			if (!(await this.app.vault.adapter.exists(safePath))) {
 				await this.app.vault.createFolder(safePath);
 			}
@@ -104,6 +120,22 @@ export default class LineToObsidianPlugin extends Plugin {
 				throw new Error('APIからの応答が配列形式ではありません。');
 			}
 			
+			// 同期済みIDの配列がない場合は初期化
+			if (!this.settings.syncedNoteIds) {
+				this.settings.syncedNoteIds = [];
+			}
+			
+			// 既存のファイルをマップに取得
+			const existingFiles = new Map();
+			const folderFiles = await this.app.vault.adapter.list(safePath);
+			for (const file of folderFiles.files) {
+				// ファイル名からIDを抽出（ファイル名は "YYYYMMDDhhmmssmmm-id.md" 形式）
+				const match = file.split('/').pop()?.match(/-([a-zA-Z0-9]+)\.md$/);
+				if (match && match[1]) {
+					existingFiles.set(match[1], file);
+				}
+			}
+			
 			// 各ノートの構造検証
 			for (const note of data) {
 				if (!note.content) {
@@ -112,11 +144,14 @@ export default class LineToObsidianPlugin extends Plugin {
 				if (!note.created || isNaN(new Date(note.created).getTime())) {
 					console.warn('作成日が無効なノートをスキップします。');
 				}
+				if (!note.id) {
+					console.warn('IDがないノートをスキップします。');
+				}
 			}
 			
 			// 安全なパスの取得と検証
 			try {
-				var safePath = this.normalizePath(this.settings.syncFolderPath);
+				safePath = this.normalizePath(this.settings.syncFolderPath);
 				if (!(await this.app.vault.adapter.exists(safePath))) {
 					await this.app.vault.createFolder(safePath);
 				}
@@ -126,11 +161,21 @@ export default class LineToObsidianPlugin extends Plugin {
 			}
 
 			let successCount = 0;
+			let updateCount = 0;
 			let latestTimestamp = 0;
 			let failedNotes = [];
 			
 			for (const note of data) {
 				try {
+					// IDがない場合はスキップ
+					if (!note.id) {
+						failedNotes.push({
+							reason: 'IDがありません',
+							content: note.content ? note.content.substring(0, 30) + '...' : 'コンテンツなし'
+						});
+						continue;
+					}
+					
 					// 日付の検証
 					if (!note.created || isNaN(new Date(note.created).getTime())) {
 						failedNotes.push({
@@ -147,11 +192,33 @@ export default class LineToObsidianPlugin extends Plugin {
 						latestTimestamp = noteTimestamp;
 					}
 					
+					// 既に同期済みかチェック
+					const isAlreadySynced = this.settings.syncedNoteIds.includes(note.id);
+					const existingFilePath = existingFiles.get(note.id);
+					
 					// ファイル名生成と保存
 					try {
-						const fileName = `${safePath}/${this.formatDate(timestamp)}.md`;
-						await this.app.vault.create(fileName, note.content || '');
-						successCount++;
+						if (existingFilePath) {
+							// 既存ファイルを更新
+							await this.app.vault.adapter.write(existingFilePath, note.content || '');
+							updateCount++;
+							
+							// 同期済みIDリストに追加（まだなければ）
+							if (!isAlreadySynced) {
+								this.settings.syncedNoteIds.push(note.id);
+							}
+						} else {
+							// 新規ファイル作成
+							const formattedDate = this.formatDateWithId(timestamp, note.id);
+							const fileName = `${safePath}/${formattedDate}.md`;
+							await this.app.vault.create(fileName, note.content || '');
+							successCount++;
+							
+							// 同期済みIDリストに追加
+							if (!isAlreadySynced) {
+								this.settings.syncedNoteIds.push(note.id);
+							}
+						}
 					} catch (fileError) {
 						console.error(`ファイル作成エラー: ${fileError.message}`);
 						failedNotes.push({
@@ -175,7 +242,7 @@ export default class LineToObsidianPlugin extends Plugin {
 				new Notice(`警告: ${failedNotes.length}件のノート保存に失敗しました。コンソールで詳細を確認できます。`);
 			}
 
-			if (successCount > 0 && latestTimestamp > 0) {
+			if ((successCount > 0 || updateCount > 0) && latestTimestamp > 0) {
 				this.settings.lastSync = latestTimestamp;
 				try {
 					await this.saveSettings();
@@ -185,7 +252,7 @@ export default class LineToObsidianPlugin extends Plugin {
 				}
 			}
 
-			new Notice(`${successCount}件のLINEメモを同期しました。`);
+			new Notice(`${successCount}件のLINEメモを同期し、${updateCount}件のメモを更新しました。`);
 		} catch (error) {
 			console.error('同期エラー:', error);
 			new Notice(`同期エラー: ${error.message}`);
@@ -259,6 +326,18 @@ export default class LineToObsidianPlugin extends Plugin {
 		// 空のパスの場合はデフォルト値を返す
 		return safePath.length > 0 ? safePath : 'LINE Memos';
 	}
+
+	formatDateWithId(date: Date, id: string): string {
+		const year = date.getFullYear();
+		const month = (date.getMonth() + 1).toString().padStart(2, '0');
+		const day = date.getDate().toString().padStart(2, '0');
+		const hours = date.getHours().toString().padStart(2, '0');
+		const minutes = date.getMinutes().toString().padStart(2, '0');
+		const seconds = date.getSeconds().toString().padStart(2, '0');
+		const milliseconds = date.getMilliseconds().toString().padStart(3, '0');
+		
+		return `${year}${month}${day}${hours}${minutes}${seconds}${milliseconds}-${id}`;
+	}
 }
 
 class LineToObsidianSettingTab extends PluginSettingTab {
@@ -292,17 +371,10 @@ class LineToObsidianSettingTab extends PluginSettingTab {
 			.addText(text => text
 				.setPlaceholder('認証トークンを入力')
 				.setValue(this.plugin.settings.authToken)
-				.setDisabled(false)
-				.inputEl.type = 'password');
-				
-		const passwordField = containerEl.querySelector('input[type="password"]');
-		if (passwordField) {
-			passwordField.addEventListener('change', async (e: Event) => {
-				const target = e.target as HTMLInputElement;
-				this.plugin.settings.authToken = target.value;
-				await this.plugin.saveSettings();
-			});
-		}
+				.onChange(async (value) => {
+					this.plugin.settings.authToken = value;
+					await this.plugin.saveSettings();
+				}));
 
 		new Setting(containerEl)
 			.setName('Sync Folder Path')
