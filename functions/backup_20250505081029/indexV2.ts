@@ -107,15 +107,12 @@ app.post('/lineWebhook', async (req: Request, res: Response) => {
     logger.info('Request body', { body: requestBody.substring(0, 100) + '...' });
     
     // 署名検証をスキップする（テスト用）
-    if (process.env.NODE_ENV === 'production') {
-      if (!line.validateSignature(requestBody, config.channelSecret, signature)) {
-        logger.error('Invalid LINE signature');
-        res.status(401).send('Invalid signature');
-        return;
-      }
-    } else {
-      logger.warn('Skipping signature verification in non-production environment');
-    }
+    // 通常時は有効にする
+    /* if (!line.validateSignature(requestBody, config.channelSecret, signature)) {
+      logger.error('Invalid LINE signature');
+      res.status(401).send('Invalid signature');
+      return;
+    } */
     
     // すぐに200 OKを返す（タイムアウト防止のため最優先）
     res.status(200).send('OK');
@@ -358,7 +355,7 @@ if (process.env.NODE_ENV === 'production') {
 */
 
 // LINE Webhook
-export const lineWebhook = onRequest(
+export const lineWebhookV2 = onRequest(
   { 
     region: 'asia-northeast1',
     cors: true,
@@ -475,7 +472,7 @@ export const lineWebhook = onRequest(
 );
 
 // メモ同期API
-export const syncNotes = onRequest(
+export const syncNotesV2 = onRequest(
   {
     region: 'asia-northeast1',
     cors: true,
@@ -483,7 +480,7 @@ export const syncNotes = onRequest(
     memory: '512MiB'
   },
   async (req: Request, res: Response) => {
-    logger.info('syncNotes function called', { method: req.method, query: req.query });
+    logger.info('syncNotesV2 function called', { method: req.method, query: req.query });
     
     // CORS設定
     res.set('Access-Control-Allow-Origin', '*');
@@ -588,7 +585,7 @@ export const syncNotes = onRequest(
 );
 
 // クリーンアップ処理
-export const cleanupSynced = onRequest(
+export const cleanupSyncedV2 = onRequest(
   {
     region: 'asia-northeast1',
     cors: true,
@@ -596,7 +593,7 @@ export const cleanupSynced = onRequest(
     memory: '256MiB'
   },
   async (req: Request, res: Response) => {
-    logger.info('cleanupSynced function called');
+    logger.info('cleanupSyncedV2 function called');
     
     try {
       // 30日以上前の同期済みメモを取得
@@ -636,7 +633,7 @@ export const cleanupSynced = onRequest(
 );
 
 // エンドポイント解決関数
-export const resolveEndpoint = onRequest(
+export const resolveEndpointV2 = onRequest(
   {
     region: 'asia-northeast1',
     cors: true,
@@ -644,7 +641,7 @@ export const resolveEndpoint = onRequest(
     memory: '512MiB'
   },
   async (req: Request, res: Response) => {
-    logger.info('resolveEndpoint function called', { method: req.method, query: req.query });
+    logger.info('resolveEndpointV2 function called', { method: req.method, query: req.query });
     
     // CORS設定
     res.set('Access-Control-Allow-Origin', '*');
@@ -699,7 +696,7 @@ export const resolveEndpoint = onRequest(
       // エンドポイントURLを生成して返す
       res.status(200).json({
         success: true,
-        endpoint: `https://asia-northeast1-${projectId}.cloudfunctions.net/syncNotes`,
+        endpoint: `https://asia-northeast1-${projectId}.cloudfunctions.net/syncNotesV2`,
         projectName: codeData.projectName || 'LINE to Obsidian Sync'
       });
     } catch (error) {

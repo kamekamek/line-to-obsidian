@@ -127,4 +127,129 @@ Default STARTUP TCP probe failed [...] consecutively for container "worker" on p
 
 - [Firebase Functions V2 ドキュメント](https://firebase.google.com/docs/functions/beta)
 - [Cloud Run 関数の概要](https://cloud.google.com/functions/docs/concepts/execution-environment)
-- [Firebase Functions V2への移行ガイド](https://firebase.google.com/docs/functions/migrate-to-v2) 
+- [Firebase Functions V2への移行ガイド](https://firebase.google.com/docs/functions/migrate-to-v2)
+
+## V2移行プロジェクトメモ
+
+Firebase Functions V1からV2への移行作業における注意点と実践的な対応方法をまとめます。
+
+### 1. V2移行時の主な変更点
+
+1. **インポート構文と関数定義方法の変更**
+   - V1: `import * as functions from 'firebase-functions'`
+   - V2: `import { onRequest } from 'firebase-functions/v2/https'`
+
+2. **ロガーの参照変更**
+   - V1: `functions.logger.info()`
+   - V2: `logger.info()`（`import { logger } from 'firebase-functions'`）
+
+3. **Expressアプリケーション連携方法**
+   - V1: 単にExpressアプリをハンドラとして渡す
+   - V2: **重要** - `app.listen(port, '0.0.0.0', () => {})`でポートリッスンが必要
+
+### 2. 移行時のよくある問題と対処法
+
+#### コンテナ起動のヘルスチェック失敗
+
+```
+Container Healthcheck failed. The user-provided container failed to start and listen on the port...
+```
+
+この問題は主にExpressアプリケーションが正しくポートをリッスンしていない場合に発生します。
+
+**解決策：**
+```typescript
+// V2では必須
+const port = process.env.PORT || 8080;
+app.listen(port, '0.0.0.0', () => {
+  logger.info(`Server listening on port ${port}`);
+});
+
+export const myFunction = onRequest({ region: 'asia-northeast1' }, app);
+```
+
+#### 環境変数の取得方法の変更
+
+- V1では`functions.config().xxx`で設定を取得
+- V2では`process.env.XXX`を使用
+
+**解決策：**
+```typescript
+// V1
+const config = {
+  key: functions.config().service?.key || '',
+};
+
+// V2
+const config = {
+  key: process.env.SERVICE_KEY || '',
+};
+```
+
+#### 関数のタイムアウト設定
+
+V2では明示的にタイムアウトを設定する必要がある場合があります。
+
+**解決策：**
+```typescript
+export const functionName = onRequest({
+  region: 'asia-northeast1',
+  timeoutSeconds: 60,  // 明示的にタイムアウトを設定
+}, handler);
+```
+
+### 3. デュアルデプロイ戦略
+
+移行時は「V2」サフィックスを付けた関数を作成し、既存のV1関数と並行してデプロイすることをお勧めします。
+
+```typescript
+// V1関数はそのまま維持
+export const myFunction = functions.region('asia-northeast1').https.onRequest(handler);
+
+// V2関数は別名で追加
+export const myFunctionV2 = onRequest({ region: 'asia-northeast1' }, handler);
+```
+
+これにより、問題発生時に素早くロールバック可能になります。
+
+### 4. ロギングの強化
+
+V2への移行時には、より詳細なログを出力することで問題のデバッグが容易になります。
+
+```typescript
+// 構造化ロギングを活用
+logger.info('Function called', { 
+  method: req.method, 
+  query: req.query,
+  path: req.path,
+  timestamp: new Date().toISOString()
+});
+```
+
+### 5. エミュレーターでのテスト重要性
+
+V2関数の動作はエミュレーターでも十分テスト可能ですが、実環境とは若干の違いがあります。
+
+```bash
+# エミュレーター起動
+firebase emulators:start
+
+# 特定の関数だけテスト
+firebase emulators:start --only functions
+```
+
+エミュレーターログを注意深く観察し、コンテナの起動と終了についての情報を確認しましょう。
+
+### 6. デプロイ後の検証
+
+デプロイ後は必ずcurlやPostmanなどで各エンドポイントを検証します。
+
+```bash
+# 基本的な動作確認
+curl https://asia-northeast1-[PROJECT_ID].cloudfunctions.net/functionNameV2
+
+# 認証が必要な場合
+curl -H "Authorization: Bearer TOKEN" https://asia-northeast1-[PROJECT_ID].cloudfunctions.net/functionNameV2
+```
+
+これらの対策を講じることで、V2移行時の問題を最小限に抑え、スムーズな移行が可能になります。 
