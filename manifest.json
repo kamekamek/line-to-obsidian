@@ -1,6 +1,6 @@
 {
 	"id": "line-to-obsidian",
-	"name": "LINE to Obsidian (Beta)",
+	"name": "LINE to Obsidian",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "LINEのメッセージをWebhookで受信し、Obsidianのノートとして同期するプラグインです。トークン認証により、特定のLINEユーザーとObsidian Vaultを紐付けます。",
