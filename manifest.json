@@ -1,9 +1,9 @@
 {
-	"id": "line-to-obsidian",
-	"name": "LINE to Obsidian",
+	"id": "line-memo-sync",
+	"name": "LINE Memo Sync",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Sync messages from LINE app to Obsidian notes via webhook. Securely connects specific LINE users to Obsidian vaults using token authentication.",
+	"description": "Sync messages from LINE app to notes via webhook. Securely connects specific LINE users to vaults using token authentication.",
 	"author": "Nagare Kameno",
 	"authorUrl": "https://github.com/kamekamek",
 	"fundingUrl": "",
