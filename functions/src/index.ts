@@ -5,12 +5,10 @@ import * as line from '@line/bot-sdk';
 import express from 'express';
 import cors from 'cors';
 import { Request, Response } from 'express';
-import * as crypto from 'crypto';
-
 // ユーティリティのインポート
 import { encryptMessage, decryptMessage } from './utils/encryption';
 import { safeLog, sanitizeLogData } from './utils/logging';
-import { executeWithRetry, getUserFriendlyErrorMessage, isRetryableError } from './utils/error-handling';
+import { executeWithRetry, getUserFriendlyErrorMessage } from './utils/error-handling';
 import { checkIpRateLimit } from './utils/rate-limit';
 
 // Firebaseの初期化
@@ -393,11 +391,11 @@ export const lineWebhook = onRequest(
     maxInstances: 10,
     memory: '256MiB',
     secrets: ['LINE_CHANNEL_ACCESS_TOKEN', 'LINE_CHANNEL_SECRET'],
-    // レート制限の追加
-    rateLimit: {
+    // レート制限の追加（コメントアウト - V2形式では対応していない）
+    /* rateLimit: {
       maxConcurrentRequests: 50,
       maxRequestsPerMinute: 300,
-    }
+    } */
   },
   async (req: Request, res: Response) => {
     // 簡易的なヘルスチェック処理
@@ -499,11 +497,11 @@ export const syncNotes = onRequest(
     cors: true,
     timeoutSeconds: 60,
     memory: '512MiB',
-    // レート制限の追加
-    rateLimit: {
+    // レート制限の追加（コメントアウト - V2形式では対応していない）
+    /* rateLimit: {
       maxConcurrentRequests: 30,
       maxRequestsPerMinute: 200,
-    }
+    } */
   },
   async (req: Request, res: Response) => {
     safeLog('info', 'syncNotes function called', { method: req.method, query: sanitizeLogData(req.query) });
@@ -699,12 +697,12 @@ export const cleanupSynced = onRequest(
     cors: true,
     timeoutSeconds: 60,
     memory: '256MiB',
-    // スケジュール設定（毎日実行）
-    schedule: {
+    // スケジュール設定（コメントアウト - V2形式では対応していない）
+    /* schedule: {
       schedule: 'every 24 hours',
       region: 'asia-northeast1',
       timeZone: 'Asia/Tokyo'
-    }
+    } */
   },
   async (req: Request, res: Response) => {
     safeLog('info', 'cleanupSynced function called');
