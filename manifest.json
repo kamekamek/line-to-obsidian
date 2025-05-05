@@ -6,6 +6,6 @@
 	"description": "Sync messages from LINE app to Obsidian notes via webhook. Securely connects specific LINE users to Obsidian vaults using token authentication.",
 	"author": "Nagare Kameno",
 	"authorUrl": "https://github.com/kamekamek",
-	"fundingUrl": "https://www.buymeacoffee.com/kamekamek",
+	"fundingUrl": "",
 	"isDesktopOnly": false
 }
