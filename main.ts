@@ -176,9 +176,8 @@ export default class LineToObsidianPlugin extends Plugin {
 					const content = `---
 created: ${timestamp.toISOString()}
 source: LINE
+_note_id: ${note.id}
 ---
-
-<!-- note_id: ${note.id} -->
 
 ${note.text}`;
 
