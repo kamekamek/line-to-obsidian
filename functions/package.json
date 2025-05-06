@@ -1,7 +1,7 @@
 {
   "name": "functions",
   "version": "1.0.0",
-  "main": "lib/indexV2.js",
+  "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
     "lint": "echo 'No linting configured'",

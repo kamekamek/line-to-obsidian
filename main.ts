@@ -12,7 +12,7 @@ interface LineToObsidianSettings {
 
 const DEFAULT_SETTINGS: LineToObsidianSettings = {
 	apiEndpoint: '',
-	projectId: 'line-obsidian-notes-sync', // デフォルトプロジェクトID
+	projectId: 'line-obsidian-notes-sync', // 中央サーバーのプロジェクトID
 	shortCode: '',
 	authToken: '',
 	syncFolderPath: 'LINE Memos',
@@ -26,7 +26,7 @@ export default class LineToObsidianPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		const ribbonIconEl = this.addRibbonIcon('lines-of-text', 'Sync LINE Memos', (evt: MouseEvent) => {
+		const ribbonIconEl = this.addRibbonIcon('turtle', 'Sync LINE Memos', (evt: MouseEvent) => {
 			this.syncNotes();
 		});
 		ribbonIconEl.addClass('line-to-obsidian-ribbon-class');
@@ -73,24 +73,24 @@ export default class LineToObsidianPlugin extends Plugin {
 
 			// エンドポイントURLの構築
 			let apiUrl = '';
-			
+
 			try {
 				// プロジェクトIDを設定から読み込み
 				const projectId = this.settings.projectId || 'line-obsidian-notes-sync';
 				const resolveEndpointUrl = `https://asia-northeast1-${projectId}.cloudfunctions.net/resolveEndpoint?code=${encodeURIComponent(this.settings.shortCode)}`;
-				
+
 				const response = await fetch(resolveEndpointUrl);
-				
+
 				if (!response.ok) {
 					throw new Error(`短縮コードからエンドポイントの解決に失敗しました: ${response.status} ${response.statusText}`);
 				}
-				
+
 				const data = await response.json();
-				
+
 				if (!data.success || !data.endpoint) {
 					throw new Error('無効な接続コードです。正しいコードを入力してください。');
 				}
-				
+
 				apiUrl = data.endpoint;
 			} catch (resolveError) {
 				console.error('エンドポイント解決エラー:', resolveError);
@@ -108,7 +108,7 @@ export default class LineToObsidianPlugin extends Plugin {
 					lastSyncTimestamp: this.settings.lastSync || 0
 				})
 			});
-			
+
 			if (!response.ok) {
 				const errorText = await response.text();
 				console.error('エラーレスポンス本文:', errorText);
@@ -116,7 +116,7 @@ export default class LineToObsidianPlugin extends Plugin {
 			}
 
 			const responseText = await response.text();
-			
+
 			let data;
 			try {
 				data = JSON.parse(responseText);
@@ -124,7 +124,7 @@ export default class LineToObsidianPlugin extends Plugin {
 				console.error('JSONパースエラー:', parseError);
 				throw new Error(`APIレスポンスのパースに失敗しました: ${parseError.message}, 受信データ: ${responseText.substring(0, 100)}...`);
 			}
-			
+
 			// レスポンス形式の判定（配列形式または新形式）
 			let notesArray = [];
 			if (Array.isArray(data)) {
@@ -147,7 +147,7 @@ export default class LineToObsidianPlugin extends Plugin {
 
 			// 同期フォルダの作成（なければ）
 			const folderPath = this.settings.syncFolderPath || 'LINE Memos';
-			
+
 			try {
 				await this.createFolderIfNotExists(folderPath);
 			} catch (error) {
@@ -168,27 +168,27 @@ export default class LineToObsidianPlugin extends Plugin {
 					const dateStr = jstTimestamp.toISOString().split('T')[0];
 					const textPreview = note.text.substring(0, 10).replace(/[\\/:*?"<>|]/g, '_');
 					const fileName = `${dateStr} ${textPreview}.md`;
-					
+
 					// ファイルパス
 					const filePath = `${folderPath}/${fileName}`;
-					
+
 					// ファイル内容（タイムスタンプはそのままISOフォーマットで保存）
 					const content = `---
 created: ${timestamp.toISOString()}
 source: LINE
-note_id: ${note.id}
+_note_id: ${note.id}
 ---
 
 ${note.text}`;
 
 					// ノートの作成
 					await this.app.vault.create(filePath, content);
-					
+
 					// 同期済みIDリストに追加
 					if (note.id && !updatedNoteIds.includes(note.id)) {
 						updatedNoteIds.push(note.id);
 					}
-					
+
 					successCount++;
 				} catch (noteError) {
 					console.error('ノート作成エラー:', noteError, note);
@@ -202,7 +202,7 @@ ${note.text}`;
 			await this.saveSettings();
 
 			new Notice(`${successCount}件のLINEメモを同期しました。`);
-			
+
 		} catch (error) {
 			console.error('同期エラー:', error);
 			new Notice(`同期中にエラーが発生しました: ${error.message}`);
@@ -217,10 +217,10 @@ ${note.text}`;
 		const minutes = date.getMinutes().toString().padStart(2, '0');
 		const seconds = date.getSeconds().toString().padStart(2, '0');
 		const milliseconds = date.getMilliseconds().toString().padStart(3, '0');
-		
+
 		// UUID部分を生成して追加（短縮版）
 		const uuid = this.generateShortUUID();
-		
+
 		return `${year}${month}${day}${hours}${minutes}${seconds}${milliseconds}-${uuid}`;
 	}
 
@@ -232,7 +232,7 @@ ${note.text}`;
 		// ランダムな16進数文字列を生成（8文字）
 		return Math.random().toString(36).substring(2, 10);
 	}
-	
+
 	/**
 	 * フォルダが存在しない場合は作成するヘルパーメソッド
 	 * @param folderPath フォルダのパス
@@ -257,31 +257,31 @@ ${note.text}`;
 		if (invalidCharsRegex.test(path)) {
 			throw new Error('パスに無効な文字が含まれています');
 		}
-		
+
 		// パスを分解して各セグメントを検証
 		const segments = path.split('/').filter(segment => segment.length > 0);
-		
+
 		// 上位ディレクトリ参照（..）を含むセグメントを検出して拒否
-		const hasParentDirRef = segments.some(segment => 
-			segment === '..' || 
-			segment.startsWith('../') || 
-			segment.endsWith('/..') || 
+		const hasParentDirRef = segments.some(segment =>
+			segment === '..' ||
+			segment.startsWith('../') ||
+			segment.endsWith('/..') ||
 			segment.includes('/../')
 		);
-		
+
 		if (hasParentDirRef) {
 			throw new Error('パスに上位ディレクトリ参照（..）が含まれています');
 		}
-		
+
 		// 現在のディレクトリ参照（.）を含むセグメントを除去
 		const cleanSegments = segments.filter(segment => segment !== '.');
-		
+
 		// 安全なパスを再構築
 		let safePath = cleanSegments.join('/');
-		
+
 		// 末尾のスラッシュを除去
 		safePath = safePath.replace(/\/+$/g, '');
-		
+
 		// 空のパスの場合はデフォルト値を返す
 		return safePath.length > 0 ? safePath : 'LINE Memos';
 	}
@@ -294,7 +294,7 @@ ${note.text}`;
 		const minutes = date.getMinutes().toString().padStart(2, '0');
 		const seconds = date.getSeconds().toString().padStart(2, '0');
 		const milliseconds = date.getMilliseconds().toString().padStart(3, '0');
-		
+
 		return `${year}${month}${day}${hours}${minutes}${seconds}${milliseconds}-${id}`;
 	}
 }
@@ -311,11 +311,12 @@ class LineToObsidianSettingTab extends PluginSettingTab {
 		const {containerEl} = this;
 
 		containerEl.empty();
+		containerEl.addClass('line-to-obsidian-settings');
 		containerEl.createEl('h2', {text: 'LINE to Obsidian 設定'});
-		
+
 		const apiSettingDiv = containerEl.createDiv('api-settings');
 		apiSettingDiv.createEl('h3', {text: '接続設定'});
-		
+
 		// 短縮コード設定（唯一の接続方法として表示）
 		new Setting(apiSettingDiv)
 			.setName('接続コード')
@@ -339,20 +340,9 @@ class LineToObsidianSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// プロジェクトID設定（開発者向け）
+		// 詳細設定セクション
 		const advancedSettingDiv = containerEl.createDiv('advanced-settings');
-		advancedSettingDiv.createEl('h3', {text: '詳細設定（開発者向け）'});
-		
-		new Setting(advancedSettingDiv)
-			.setName('Firebase プロジェクトID')
-			.setDesc('独自のFirebase環境を使用する場合のみ変更してください。')
-			.addText(text => text
-				.setPlaceholder('line-obsidian-notes-sync')
-				.setValue(this.plugin.settings.projectId)
-				.onChange(async (value) => {
-					this.plugin.settings.projectId = value;
-					await this.plugin.saveSettings();
-				}));
+		advancedSettingDiv.createEl('h3', {text: '詳細設定'});
 
 		new Setting(containerEl)
 			.setName('Sync Folder Path')
@@ -369,7 +359,7 @@ class LineToObsidianSettingTab extends PluginSettingTab {
 			.setName('Last Sync Timestamp')
 			.setDesc('最後に同期した日時。')
 			.addText(text => {
-				const value = this.plugin.settings.lastSync 
+				const value = this.plugin.settings.lastSync
 					? new Date(this.plugin.settings.lastSync).toLocaleString()
 					: '未同期';
 				text.setValue(value)
@@ -382,6 +372,7 @@ class LineToObsidianSettingTab extends PluginSettingTab {
 			.addButton(button => button
 				.setButtonText('Sync Now')
 				.setCta()
+				.setClass('line-to-obsidian-sync-button')
 				.onClick(async () => {
 					await this.plugin.syncNotes();
 					this.display(); // 最終同期時間を更新するために画面を再描画
