@@ -2,7 +2,6 @@
 
 > LINEチャットで送信したメッセージをObsidianのノートとして自動的に同期するプラグイン
 
-![LINEメモ同期デモ](https://github.com/kamekamek/line-to-obsidian/raw/master/images/demo.gif)
 
 ## 概要
 
@@ -26,7 +25,7 @@
 
 | 設定画面 | 同期されたメモ | LINE Botとのやり取り |
 |--------|-------------|-------------------|
-| ![設定画面](https://github.com/kamekamek/line-to-obsidian/raw/master/images/settings.png) | ![同期メモ](https://github.com/kamekamek/line-to-obsidian/raw/master/images/synced_notes.png) | ![LINE Bot](https://github.com/kamekamek/line-to-obsidian/raw/master/images/line_chat.png) |
+| ![設定画面](./images/settings.png) | ![同期メモ](./images/synced_notes.png) | ![LINE Bot](./images/line_chat.png) |
 
 ## インストール方法
 
