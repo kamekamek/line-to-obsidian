@@ -3,6 +3,22 @@
 This CSS file will be included with your plugin, and
 available in the app when your plugin is enabled.
 
-If your plugin does not need CSS, delete this file.
-
 */
+
+/* LINE風のスタイリング */
+
+/* リボンアイコンのスタイル */
+.line-to-obsidian-ribbon-class svg {
+  color: #06C755 !important; /* LINEの緑色 */
+}
+
+/* 設定画面のスタイル */
+.line-to-obsidian-settings h2 {
+  color: #06C755;
+}
+
+/* 同期ボタンのスタイル */
+.line-to-obsidian-sync-button {
+  background-color: #06C755 !important;
+  color: white !important;
+}
